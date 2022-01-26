@@ -4,7 +4,7 @@ import android.app.Activity;
 import android.view.Surface;
 
 
-class VaporWorldVRWrapper {
+public class VaporWorldVRWrapper {
 	// ==================
 	// Activity lifecycle
 	// ==================

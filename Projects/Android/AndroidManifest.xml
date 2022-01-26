@@ -15,7 +15,7 @@
 	<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-	<application android:allowBackup="false" android:label="vaporworld_vr">
+	<application android:allowBackup="false" android:label="vaporworldvr">
 		<meta-data android:name="com.samsung.android.vr.application.mode" android:value="vr_only"/>
 		<meta-data android:name="com.oculus.supportedDevices" android:value="all" />
 		<!-- launchMode is set to singleTask because there should never be multiple copies of the app running -->

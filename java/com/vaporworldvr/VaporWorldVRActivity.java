@@ -5,10 +5,10 @@ import android.os.Bundle;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
-class VaporWorldVRActivity extends Activity implements SurfaceHolder.Callback {
+public class VaporWorldVRActivity extends Activity implements SurfaceHolder.Callback {
 	static {
 		// Load DLL library
-		System.loadLibrary("vaporworld_vr");
+		System.loadLibrary("vaporworldvr");
 	}
 
 	/**

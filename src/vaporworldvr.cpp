@@ -1,11 +1,15 @@
 #include <stddef.h>
+#include <android/log.h>
 #include <android/native_window_jni.h>
 
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 /* Called after the application is created. */
 JNIEXPORT jlong JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onCreate(JNIEnv* env, jobject obj, jobject activity)
 {
-	// TODO
+	__android_log_print(ANDROID_LOG_VERBOSE, "VaporWorldVR", "VaporWorldVR::onCreate");
 	return static_cast<size_t>(0);
 }
 
@@ -54,8 +58,11 @@ JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onSurfaceChange
 }
 
 /* Called after the surface is destroyed. */
-JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onSurfaceChanged(JNIEnv* env, jobject obj,
+JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onSurfaceDestroyed(JNIEnv* env, jobject obj,
                                                                                   jlong handle)
 {
 	// TODO
 }
+#ifdef __cplusplus
+}
+#endif
