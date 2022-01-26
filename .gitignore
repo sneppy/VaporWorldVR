@@ -1,0 +1,12 @@
+# Build files
+build/
+.gradle/
+.cxx/
+*.keystore
+
+# Oculus Mobile SDK
+/ovr_sdk_mobile/
+
+# VS Code
+.vscode/
+*.code-workspace
