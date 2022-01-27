@@ -1,15 +1,46 @@
 #include <stddef.h>
-#include <android/log.h>
 #include <android/native_window_jni.h>
 
+#include "logging.h"
+#include "runnable_thread.h"
 
+
+namespace VaporWorldVR
+{
+	class Application : public Runnable
+	{
+	public:
+		virtual void run() override
+		{
+			auto* thread = getThread();
+			VW_LOG_DEBUG("Threads are working!");
+			VW_LOG_DEBUG("This is thread '%s' with tid=%d", thread->getName().c_str(), thread->getId());
+		}
+	};
+} // namespace VaporWorldVR
+
+
+void test()
+{
+	using namespace VaporWorldVR;
+	auto* app = new Application;
+	auto* appThread = createRunnableThread(app);
+	appThread->start();
+	appThread->join();
+	delete app;
+}
+
+
+// =============================
+// Activity lifecycle callbacks.
+// =============================
 #ifdef __cplusplus
 extern "C" {
 #endif
 /* Called after the application is created. */
 JNIEXPORT jlong JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onCreate(JNIEnv* env, jobject obj, jobject activity)
 {
-	__android_log_print(ANDROID_LOG_VERBOSE, "VaporWorldVR", "VaporWorldVR::onCreate");
+	test();
 	return static_cast<size_t>(0);
 }
 

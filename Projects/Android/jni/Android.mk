@@ -5,11 +5,11 @@ include $(CLEAR_VARS)
 
 # Define shared library source files and compilation flags
 LOCAL_MODULE := vaporworldvr
+LOCAL_SRC_FILES := ../../../src/vaporworldvr.cpp\
+                   ../../../src/runnable_thread.cpp
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../include
 LOCAL_CFLAGS += -std=c11 -Werror
-LOCAL_CPPFLAGS += -std=c++17 -Werror
-LOCAL_CPP_FEATURES += concepts-ts
-LOCAL_SRC_FILES := ../../../src/vaporworldvr.cpp
-LOCAL_C_INCLUDES += ../../../include
+LOCAL_CPPFLAGS += -std=c++2a -Werror
 LOCAL_LDLIBS := -lEGL -lGLESv3 -landroid -llog
 LOCAL_SHARED_LIBRARIES := vrapi
 

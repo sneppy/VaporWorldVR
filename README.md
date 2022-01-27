@@ -25,12 +25,6 @@ Create a directory in the SDK where to place your VR projects, and clone this re
 ~/Projects/ovr_sdk_mobile/VrProjects$ git clone git@github.com:sneppy/VaporWorldVR.git
 ```
 
-Alternatively, you can clone the repository somewhere else and create a symbolic link:
-
-```console
-~/Projects/ovr_sdk_mobile/VrProjects$ ln -s <path_to_repo>
-```
-
 Cd into the Android project, and run `gradlew`:
 
 ```console
@@ -39,7 +33,7 @@ Cd into the Android project, and run `gradlew`:
 
 If you haven't configured the Android SDK, or you misconfigured it, you will see some errors. See [Configure Android SDK](ConfigureAndroidSDK.md) for more informations.
 
-Finally, run the `build` task to build and test the application, and the `install(Debug|Release)` task to install the application on the connected device:
+Finally, run the `build(Debug|Release)` task to build and test the application, and the `install(Debug|Release)` task to install the application on the connected device:
 
 ```console
 ~/Projects/ovr_sdk_mobile/VrProjects/Projects/Android$ ../../../../gradlew installRelease
