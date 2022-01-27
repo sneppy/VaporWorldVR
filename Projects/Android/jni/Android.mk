@@ -7,7 +7,8 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := vaporworldvr
 LOCAL_SRC_FILES := ../../../src/vaporworldvr.cpp\
                    ../../../src/runnable_thread.cpp
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../include
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../include\
+                    $(LOCAL_PATH)/../../../external/gcem/include
 LOCAL_CFLAGS += -std=c11 -Werror
 LOCAL_CPPFLAGS += -std=c++2a -Werror
 LOCAL_LDLIBS := -lEGL -lGLESv3 -landroid -llog

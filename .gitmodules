@@ -1,0 +1,3 @@
+[submodule "external/gcem"]
+	path = external/gcem
+	url = https://github.com/kthohr/gcem.git

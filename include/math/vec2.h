@@ -93,6 +93,18 @@ namespace VaporWorldVR::Math
 		}
 
 		/**
+		 * @brief Same as getSize(), but uses the fast version of sqrt.
+		 *
+		 * The return value is much less accurate then the return of getSize(),
+		 * so use carefully.
+		 */
+		constexpr FORCE_INLINE T getSize_Fast() const
+		{
+			// Only defined for 32-bit float coordinates vector
+			return {};
+		}
+
+		/**
 		 * @brief Divides all coordinates by the vector's size.
 		 *
 		 * If the vector is not a floating-point vector, the result is
@@ -299,6 +311,28 @@ namespace VaporWorldVR::Math
 			return {static_cast<U>(x), static_cast<U>(y)};
 		}
 	};
+
+
+	// ==================================
+	// Vec2 floating-point specialization
+	// ==================================
+	template<>
+	constexpr FORCE_INLINE float Vec2<float>::getSize() const
+	{
+		return sqrt(getSize2());
+	}
+
+	template<>
+	constexpr FORCE_INLINE double Vec2<double>::getSize() const
+	{
+		return sqrt(getSize2());
+	}
+
+	template<>
+	constexpr FORCE_INLINE float Vec2<float>::getSize_Fast() const
+	{
+		return fsqrt(getSize2());
+	}
 
 
 	// ==================

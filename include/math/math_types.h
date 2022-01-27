@@ -28,3 +28,6 @@ namespace VaporWorldVR
 	using uint3 = Math::Vec3<uint>;
 	using uint4 = Math::Vec4<uint>;
 } // namespace VaporWorld
+
+
+#include "math_types.inl"

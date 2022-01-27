@@ -3,7 +3,7 @@
 #include "vec3.h"
 
 
-namespace VaporWorldVR
+namespace VaporWorldVR::Math
 {
 	/**
 	 * @brief Implements a templated vector with 4 coordinates.
@@ -87,7 +87,7 @@ namespace VaporWorldVR
 
 		constexpr FORCE_INLINE T const& operator[](int idx) const
 		{
-			return const_cast<Vec3&>(*this)[idx];
+			return const_cast<Vec4&>(*this)[idx];
 		}
 		/// @}
 
@@ -105,6 +105,18 @@ namespace VaporWorldVR
 		constexpr FORCE_INLINE T getSize() const
 		{
 			// Only defined for floating-point coordiante types
+			return {};
+		}
+
+		/**
+		 * @brief Same as getSize(), but uses the fast version of sqrt.
+		 *
+		 * The return value is much less accurate then the return of getSize(),
+		 * so use carefully.
+		 */
+		constexpr FORCE_INLINE T getSize_Fast() const
+		{
+			// Only defined for 32-bit float coordinates vector
 			return {};
 		}
 
@@ -320,6 +332,28 @@ namespace VaporWorldVR
 	};
 
 
+	// ==================================
+	// Vec4 floating-point specialization
+	// ==================================
+	template<>
+	constexpr FORCE_INLINE float Vec4<float>::getSize() const
+	{
+		return sqrt(getSize2());
+	}
+
+	template<>
+	constexpr FORCE_INLINE double Vec4<double>::getSize() const
+	{
+		return sqrt(getSize2());
+	}
+
+	template<>
+	constexpr FORCE_INLINE float Vec4<float>::getSize_Fast() const
+	{
+		return fsqrt(getSize2());
+	}
+
+
 	// ==================
 	// Vec4 static values
 	// ==================
@@ -328,4 +362,4 @@ namespace VaporWorldVR
 
 	template<typename T>
 	constexpr Vec4<T> Vec4<T>::one = {1, 1, 1, 1};
-} // namespace VaporWorldVR
+} // namespace VaporWorldVR::Math
