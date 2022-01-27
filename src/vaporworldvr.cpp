@@ -3,6 +3,7 @@
 
 #include "logging.h"
 #include "runnable_thread.h"
+#include "math/math.h"
 
 
 namespace VaporWorldVR
@@ -15,6 +16,10 @@ namespace VaporWorldVR
 			auto* thread = getThread();
 			VW_LOG_DEBUG("Threads are working!");
 			VW_LOG_DEBUG("This is thread '%s' with tid=%d", thread->getName().c_str(), thread->getId());
+
+			float3 position = float3::one;
+			VW_LOG_DEBUG("Player position: <%g, %g, %g>", position.x, position.y, position.z);
+			VW_LOG_DEBUG("Player distance: %g", position.getSize2());
 		}
 	};
 } // namespace VaporWorldVR
