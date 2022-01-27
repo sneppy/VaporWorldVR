@@ -3,6 +3,16 @@
 #include "vec2.h"
 
 
+#ifndef VW_MATH_VEC3_ALIGN_TO_VEC4
+# define VW_MATH_VEC3_ALIGN_TO_VEC4 0
+#endif
+
+#if VW_MATH_VEC3_ALIGN_TO_VEC4
+# define VW_MATH_VEC3_ALIGN_SPEC alignas(sizeof(T) * 4)
+#else
+# define VW_MATH_VEC3_ALIGN_SPEC
+#endif
+
 namespace VaporWorldVR::Math
 {
 	/**
@@ -11,7 +21,7 @@ namespace VaporWorldVR::Math
 	 * @tparam T The type of the vector coordinates
 	 */
 	template<typename T>
-	struct Vec3
+	struct VW_MATH_VEC3_ALIGN_SPEC Vec3
 	{
 		/* Vec3 static values. */
 		/// @{

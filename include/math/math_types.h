@@ -8,6 +8,7 @@ namespace VaporWorldVR::Math
 	template<typename T> struct Vec2;
 	template<typename T> struct Vec3;
 	template<typename T> struct Vec4;
+	                     struct Quat;
 } // namespace VaporWorld::Math
 
 
@@ -27,6 +28,8 @@ namespace VaporWorldVR
 	using uint2 = Math::Vec2<uint>;
 	using uint3 = Math::Vec3<uint>;
 	using uint4 = Math::Vec4<uint>;
+
+	using quat = Math::Quat;
 } // namespace VaporWorld
 
 

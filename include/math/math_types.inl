@@ -1,8 +1,8 @@
-#ifndef VW_PLATFORM_USE_GCEM
-# define VW_PLATFORM_USE_GCEM 1
+#ifndef VW_MATH_USE_GCEM
+# define VW_MATH_USE_GCEM 1
 #endif
 
-#if VW_PLATFORM_USE_GCEM
+#if VW_MATH_USE_GCEM
 # include "gcem.hpp"
 #else
 # include <math.h>
@@ -11,7 +11,7 @@
 
 namespace VaporWorldVR::Math
 {
-#if VW_PLATFORM_USE_GCEM
+#if VW_MATH_USE_GCEM
 	/* Computes the sine of the given value (in radians). */
 	/// @{
 	constexpr FORCE_INLINE float sin(float x)   { return ::gcem::sin(x); }
@@ -36,16 +36,22 @@ namespace VaporWorldVR::Math
 	constexpr FORCE_INLINE double asin(double x) { return ::gcem::asin(x); }
 	/// @}
 
-	/* Computes the arcsine of the given value. */
+	/* Computes the arccosine of the given value. */
 	/// @{
 	constexpr FORCE_INLINE float acos(float x)   { return ::gcem::acos(x); }
 	constexpr FORCE_INLINE double acos(double x) { return ::gcem::acos(x); }
 	/// @}
 
-	/* Computes the arcsine of the given value. */
+	/* Computes the arctangent of the given value. */
 	/// @{
 	constexpr FORCE_INLINE float atan(float x)   { return ::gcem::atan(x); }
 	constexpr FORCE_INLINE double atan(double x) { return ::gcem::atan(x); }
+	/// @}
+
+	/* Computes the arctangent from the sine and cosine of the angle. */
+	/// @{
+	constexpr FORCE_INLINE float atan(float y, float x)   { return ::gcem::atan2(y, x); }
+	constexpr FORCE_INLINE double atan(double y, double x) { return ::gcem::atan2(y, x); }
 	/// @}
 
 	/* Computes the square root of the given value. */
@@ -53,6 +59,7 @@ namespace VaporWorldVR::Math
 	constexpr FORCE_INLINE float sqrt(float x)   { return ::gcem::sqrt(x); }
 	constexpr FORCE_INLINE double sqrt(double x) { return ::gcem::sqrt(x); }
 	/// @}
+#endif
 
 	/**
 	 * @brief Returns the inverse square root of the given value.
@@ -86,5 +93,4 @@ namespace VaporWorldVR::Math
 	{
 		return 1.f / finvsqrt(x);
 	}
-#endif
 } // namespace VaporWorldVR::Math
