@@ -66,7 +66,7 @@ namespace VaporWorldVR::Math
 		 * @param other A Vec3
 		 * @param z The value of the W coordinate
 		 */
-		constexpr FORCE_INLINE Vec4(Vec3<T> const& other, T z)
+		constexpr FORCE_INLINE Vec4(Vec3<T> const& other, T w)
 			: coords{other.x, other.y, other.z, w}
 		{}
 
