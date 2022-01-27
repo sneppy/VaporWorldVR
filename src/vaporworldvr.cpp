@@ -28,21 +28,11 @@ namespace VaporWorldVR
 			VW_LOG_DEBUG("Player rotation: %g @ <%g, %g, %g>", angle, axis.x, axis.y, axis.z);
 			VW_LOG_DEBUG("Player distance from origin: %g", position.getSize());
 
-			VW_LOG_DEBUG("Simulating 1 minute, 30 steps per min");
-			VW_LOG_DEBUG("=====================================");
-			for (int i = 0; i < 30 * 60; ++i)
-			{
-				float dt = 1.f / 30.f;
-				linearVelocity += float3::down * 9.81f * dt;
-				position += linearVelocity * dt;
-				rotation = quat{angularVelocity * dt} * rotation;
-
-				rotation.getAxisAndAngle(axis, angle);
-				VW_LOG_DEBUG("// Step %d", i);
-				VW_LOG_DEBUG("Player position: <%g, %g, %g>", position.x, position.y, position.z);
-				VW_LOG_DEBUG("Player rotation: %g @ <%g, %g, %g>", angle, axis.x, axis.y, axis.z);
-				VW_LOG_DEBUG("Player distance from origin: %g", position.getSize());
-			}
+			float4x4 m, n, o;
+			m = float4x4::eye;
+			n = float4x4{1.f};
+			o = m.dot(n);
+			float3 v = (!o).transformVector(float3::up);
 		}
 	};
 } // namespace VaporWorldVR
