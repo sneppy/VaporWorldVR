@@ -22,6 +22,8 @@ namespace VaporWorldVR
 		friend RunnableThread;
 
 	public:
+		virtual ~Runnable() {}
+
 		/**
 		 * @brief Returns the thread this task is running on.
 		 */
@@ -37,8 +39,22 @@ namespace VaporWorldVR
 		 */
 		virtual void run() = 0;
 
+		/**
+		 * @brief Called before run() to setup the runnable.
+		 *
+		 * Called from the containing thread.
+		 */
+		virtual void setup() {};
+
+		/**
+		 * @brief Called after run() to perform teardown.
+		 *
+		 * Called from the containing thread.
+		 */
+		virtual void teardown() {};
+
 	protected:
-		/* Pointer to the thread this task is executing on. */
+		/* Pointer that points to the thread this task is running on. */
 		RunnableThread* thread;
 	};
 
@@ -176,4 +192,11 @@ namespace VaporWorldVR
 	 * @return Ptr to the created thread
 	 */
 	RunnableThread* createRunnableThread(Runnable* runnable);
+
+	/**
+	 * @brief Destroy a RunnableThread created with createRunnableThread().
+	 *
+	 * @param runnable The RunnableThread to destroy
+	 */
+	void destroyRunnableThread(RunnableThread* thread, bool forceQuit = false);
 } // namespace VaporWorldVR

@@ -57,6 +57,7 @@ namespace VaporWorldVR
 	RunnableThread::~RunnableThread()
 	{
 		VW_ASSERT(runnable != nullptr);
+		VW_CHECKF(state == State_Terminated, "Destroying live thread @ %p", this);
 		runnable->thread = this;
 	}
 
@@ -85,6 +86,7 @@ namespace VaporWorldVR
 		// Wait for runnable to finish
 		int result = pthread_join(thread, NULL);
 		VW_ASSERTF(result == 0, "Error occured while joining thread '%s'", name.c_str());
+		state = State_Terminated;
 	}
 
 	void* RunnableThreadImpl::pthreadStart(void* payload)
@@ -95,12 +97,22 @@ namespace VaporWorldVR
 			VW_LOG_WARN("Invalid task for thread '%s'", self->getName().c_str());
 			return nullptr;
 		}
+		self->state = State_Started;
 
 		// Read the thread id
 		self->tid = gettid();
 
+		// Setup the runnable task
+		self->runnable->setup();
+
 		// Run the runnable task
+		self->state = State_Resumed;
 		self->runnable->run();
+		self->state = State_Paused;
+
+		// Teardown task
+		self->runnable->teardown();
+
 		return nullptr;
 	}
 
@@ -108,5 +120,19 @@ namespace VaporWorldVR
 	RunnableThread* createRunnableThread(Runnable* runnable)
 	{
 		return new RunnableThreadImpl(runnable);
+	}
+
+	void destroyRunnableThread(RunnableThread* thread, bool forceQuit)
+	{
+		if (thread->getState() != RunnableThread::State_Terminated)
+		{
+			if (!forceQuit)
+			{
+				// Wait for thread to finish
+				thread->join();
+			}
+		}
+
+		delete thread;
 	}
 } // namespace VaporWorldVR

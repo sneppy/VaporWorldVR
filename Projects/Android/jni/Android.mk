@@ -6,7 +6,9 @@ include $(CLEAR_VARS)
 # Define shared library source files and compilation flags
 LOCAL_MODULE := vaporworldvr
 LOCAL_SRC_FILES := ../../../src/vaporworldvr.cpp\
-                   ../../../src/runnable_thread.cpp
+                   ../../../src/runnable_thread.cpp\
+                   ../../../src/thread_utils.cpp
+LOCAL_CPP_FEATURES := rtti
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../include\
                     $(LOCAL_PATH)/../../../external/gcem/include
 LOCAL_CFLAGS += -std=c11 -Werror
