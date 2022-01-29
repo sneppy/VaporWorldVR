@@ -73,7 +73,8 @@ namespace VaporWorldVR
 		 *
 		 * @param msg The message to post
 		 */
-		void postMessage(auto&& msg)
+		template<typename MessageT>
+		void postMessage(MessageT&& msg)
 		{
 			mutex->lock();
 			{
