@@ -149,7 +149,7 @@ namespace VaporWorldVR
 
 	EventImpl::~EventImpl()
 	{
-		VW_CHECKF(state == Event::State_NotifyNone, "Event destroyed, but clients were still waiting");
+		VW_CHECKF(numWaiting == 0, "Event destroyed, but %u clients were still waiting", numWaiting);
 
 		if (initd)
 		{
@@ -175,25 +175,11 @@ namespace VaporWorldVR
 			switch (state)
 			{
 			case State_NotifyOne:
-			{
-				status = true;
-
-				// Reset state, so that other threads waiting are not triggered
+				// Even if there are other threads waiting, we notify only one
 				state = State_NotifyNone;
-			}
-			break;
-
 			case State_NotifyAll:
-			{
 				status = true;
-
-				if (numWaiting == 1)
-				{
-					// Reset state if this was the last client
-					state = State_NotifyNone;
-				}
-			}
-			break;
+				break;
 
 			case State_NotifyNone:
 			{
@@ -207,7 +193,7 @@ namespace VaporWorldVR
 
 			default:
 			{
-				VW_LOG_ERROR("Invalid event state: %d", state);
+				VW_LOG_ERROR("Invalid event state '%d'", state);
 			}
 			break;
 			}
@@ -215,6 +201,12 @@ namespace VaporWorldVR
 			// Remove from waiting queue
 			numWaiting--;
 		} while (!status);
+
+		if (numWaiting == 0)
+		{
+			// Reset event state for future use
+			state = State_NotifyNone;
+		}
 	}
 
 	void EventImpl::notifyAll()
@@ -236,7 +228,7 @@ namespace VaporWorldVR
 
 	Event* createEvent()
 	{
-		return new EventImpl();
+		return new EventImpl{};
 	}
 
 	void destroyEvent(Event* event)

@@ -9,6 +9,14 @@
 
 namespace VaporWorldVR
 {
+	enum MessageWait
+	{
+		MessageWait_None = 0,
+		MessageWait_Received = 1 << 0,
+		MessageWait_Processed = 1 << 1
+	};
+
+
 	/* Base class for messages exchanged between application modules. */
 	struct Message {};
 
@@ -41,7 +49,9 @@ namespace VaporWorldVR
 			, tail{&beforeFirst}
 #pragma clang diagnostic pop
 			, mutex{createMutex()}
-			, event{createEvent()}
+			, eventSent{createEvent()}
+			, eventRcvd{createEvent()}
+			, eventProc{createEvent()}
 		{
 			beforeFirst.next = nullptr;
 		}
@@ -53,7 +63,9 @@ namespace VaporWorldVR
 		{
 			// TODO: Empty queue
 
-			destroyEvent(event);
+			destroyEvent(eventProc);
+			destroyEvent(eventRcvd);
+			destroyEvent(eventSent);
 			destroyMutex(mutex);
 		}
 
@@ -72,21 +84,39 @@ namespace VaporWorldVR
 		 * flushMessages().
 		 *
 		 * @param msg The message to post
+		 * @param flags Used to request acks from the target
 		 */
 		template<typename MessageT>
-		void postMessage(MessageT&& msg)
+		void postMessage(MessageT&& msg, int flags = MessageWait_None)
 		{
 			mutex->lock();
 			{
 				// Push to queue
-				tail = tail->next = new MessageWrapper{FORWARD(msg)};
+				auto* wrapper = new MessageWrapper{FORWARD(msg), flags};
+				tail = tail->next = wrapper;
 
 				// Notify target
-				event->notifyOne();
+				eventSent->notifyOne();
+
+				if ((flags & MessageWait_Received) == MessageWait_Received)
+				{
+					while ((wrapper->ackFlags & AckFlag_Received) != AckFlag_Received)
+					{
+						// Wait for the received event to trigger and check again
+						eventRcvd->wait(mutex);
+					}
+				}
+
+				if ((flags & MessageWait_Processed) == MessageWait_Processed)
+				{
+					while ((wrapper->ackFlags & AckFlag_Processed) != AckFlag_Processed)
+					{
+						// Wait for the processed event to trigger and check again
+						eventProc->wait(mutex);
+					}
+				}
 			}
 			mutex->unlock();
-
-			// TODO: Wait ack?
 		}
 
 		/**
@@ -102,7 +132,7 @@ namespace VaporWorldVR
 				while (blocking && isEmpty())
 				{
 					// Block on waiting for new messages
-					event->wait(mutex);
+					eventSent->wait(mutex);
 				}
 
 				// Process queue
@@ -113,14 +143,27 @@ namespace VaporWorldVR
 					auto* wrapper = it->next;
 					it->next = wrapper->next;
 
+					if (wrapper->reqFlags & MessageWait_Received)
+					{
+						// Signal received event
+						wrapper->ackFlags |= AckFlag_Received;
+						eventRcvd->notifyOne();
+					}
+
 					// Process message
 					::std::visit([this](auto const& msg) -> void {
 
 						static_cast<TargetT*>(this)->processMessage(msg);
 					}, wrapper->msg);
 
-					// Destroy the wrapper and the message
-					delete wrapper;
+					if (wrapper->reqFlags & MessageWait_Processed)
+					{
+						// Signal processed event
+						wrapper->ackFlags |= AckFlag_Processed;
+						eventProc->notifyOne();
+					}
+
+					// TODO: No one is disposing messages, we need to ref count them
 				}
 				tail = it;
 			}
@@ -128,14 +171,26 @@ namespace VaporWorldVR
 		}
 
 	protected:
+		enum AckFlag
+		{
+			AckFlag_Received = 0x1,
+			AckFlag_Processed = 0x2
+		};
+
 		/* Wraps a message with a pointer to the next message in the queue. */
 		struct MessageWrapper
 		{
 			/* This message. */
 			MessageVarT msg;
 
+			/* Wether should block until received/processed. */
+			int reqFlags;
+
+			/* Ack flags (used for both received and processed). */
+			int ackFlags = 0;
+
 			/* Pointer to next message in queue. */
-			MessageWrapper* next;
+			MessageWrapper* next = nullptr;
 		};
 
 		union
@@ -153,7 +208,13 @@ namespace VaporWorldVR
 		/* Mutex that provides protected access to the queue. */
 		Mutex* mutex;
 
-		/* Event used to signal incoming messages. */
-		Event* event;
+		/* Event fired whenever a new message is posted. */
+		Event* eventSent;
+
+		/* Event fired when a message that requires a ack is received. */
+		Event* eventRcvd;
+
+		/* Event fired after a message that requires a ack is processed. */
+		Event* eventProc;
 	};
 } // namespace VaporWorldVR
