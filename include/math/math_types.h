@@ -28,10 +28,10 @@ namespace VaporWorldVR
 	using int4   = Math::Vec4<int>;
 	using int4x4 = Math::Mat4<int>;
 
-	using uint2   = Math::Vec2<uint>;
-	using uint3   = Math::Vec3<uint>;
-	using uint4   = Math::Vec4<uint>;
-	using uint4x4 = Math::Mat4<uint>;
+	using uint2   = Math::Vec2<uint32_t>;
+	using uint3   = Math::Vec3<uint32_t>;
+	using uint4   = Math::Vec4<uint32_t>;
+	using uint4x4 = Math::Mat4<uint32_t>;
 
 	using quat = Math::Quat;
 } // namespace VaporWorld
