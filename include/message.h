@@ -61,8 +61,20 @@ namespace VaporWorldVR
 		 */
 		~MessageTarget()
 		{
-			// TODO: Empty queue
+			VW_CHECKF(isEmpty(), "Some messages still in queue, but target is being destroyed");
 
+			for (auto* it = &beforeFirst; it->next;)
+			{
+				// Destroy all messages in queue
+				auto* wrapper = it->next;
+				VW_CHECKF(wrapper->refCount == 0, "Destroying message @ %p with %u live refs", wrapper,
+				          wrapper->refCount);
+
+				it->next = wrapper->next;
+				delete wrapper;
+			}
+
+			// Destroy mutex and events
 			destroyEvent(eventProc);
 			destroyEvent(eventRcvd);
 			destroyEvent(eventSent);
@@ -100,20 +112,24 @@ namespace VaporWorldVR
 
 				if ((flags & MessageWait_Received) == MessageWait_Received)
 				{
+					acquireRef(wrapper);
 					while ((wrapper->ackFlags & AckFlag_Received) != AckFlag_Received)
 					{
 						// Wait for the received event to trigger and check again
 						eventRcvd->wait(mutex);
 					}
+					releaseRef(wrapper);
 				}
 
 				if ((flags & MessageWait_Processed) == MessageWait_Processed)
 				{
+					acquireRef(wrapper);
 					while ((wrapper->ackFlags & AckFlag_Processed) != AckFlag_Processed)
 					{
 						// Wait for the processed event to trigger and check again
 						eventProc->wait(mutex);
 					}
+					releaseRef(wrapper);
 				}
 			}
 			mutex->unlock();
@@ -139,6 +155,8 @@ namespace VaporWorldVR
 				auto* it = &beforeFirst;
 				while (it->next)
 				{
+					acquireRef(it->next);
+
 					// Pop message
 					auto* wrapper = it->next;
 					it->next = wrapper->next;
@@ -151,9 +169,9 @@ namespace VaporWorldVR
 					}
 
 					// Process message
-					::std::visit([this](auto const& msg) -> void {
+					::std::visit([this](auto&& msg) -> void {
 
-						static_cast<TargetT*>(this)->processMessage(msg);
+						static_cast<TargetT*>(this)->processMessage(FORWARD(msg));
 					}, wrapper->msg);
 
 					if (wrapper->reqFlags & MessageWait_Processed)
@@ -163,7 +181,7 @@ namespace VaporWorldVR
 						eventProc->notifyOne();
 					}
 
-					// TODO: No one is disposing messages, we need to ref count them
+					releaseRef(wrapper);
 				}
 				tail = it;
 			}
@@ -173,8 +191,8 @@ namespace VaporWorldVR
 	protected:
 		enum AckFlag
 		{
-			AckFlag_Received = 0x1,
-			AckFlag_Processed = 0x2
+			AckFlag_Received = 1 << 0,
+			AckFlag_Processed = 1 << 1
 		};
 
 		/* Wraps a message with a pointer to the next message in the queue. */
@@ -184,10 +202,14 @@ namespace VaporWorldVR
 			MessageVarT msg;
 
 			/* Wether should block until received/processed. */
-			int reqFlags;
+			int reqFlags = 0;
 
 			/* Ack flags (used for both received and processed). */
 			int ackFlags = 0;
+
+			// TODO: maybe use an atomic, though we only write this in critical sections
+			/* Number of live references. */
+			uint32_t refCount = 0;
 
 			/* Pointer to next message in queue. */
 			MessageWrapper* next = nullptr;
@@ -216,5 +238,20 @@ namespace VaporWorldVR
 
 		/* Event fired after a message that requires a ack is processed. */
 		Event* eventProc;
+
+		FORCE_INLINE void acquireRef(MessageWrapper* wrapper)
+		{
+			wrapper->refCount++;
+		}
+
+		FORCE_INLINE void releaseRef(MessageWrapper* wrapper)
+		{
+			wrapper->refCount--;
+			if (wrapper->refCount == 0)
+			{
+				// Delete message
+				delete wrapper;
+			}
+		}
 	};
 } // namespace VaporWorldVR
