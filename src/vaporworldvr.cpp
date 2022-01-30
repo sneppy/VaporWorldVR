@@ -7,13 +7,12 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES3/gl3.h>
-#include <GLES3/gl3ext.h>
 
 #include "VrApi.h"
 #include "VrApi_Helpers.h"
 
 #include "logging.h"
+#include "vwgl.h"
 #include "runnable_thread.h"
 #include "event.h"
 #include "mutex.h"
@@ -23,9 +22,19 @@
 
 #define FORWARD(x) ::std::forward<decltype((x))>((x))
 
+#define VW_TEXTURE_SWAPCHAIN_MAX_LEN 16
+
 
 namespace VaporWorldVR
 {
+	class Application;
+	class Renderer;
+	class Scene;
+
+	class GPUBuffer;
+	class VertexBuffer;
+	class IndexBuffer;
+
 	struct EGLState
 	{
 		EGLint versionMajor = -1;
@@ -33,6 +42,7 @@ namespace VaporWorldVR
 		EGLDisplay display = EGL_NO_DISPLAY;
 		EGLConfig config = EGL_NO_CONFIG_KHR;
 		EGLSurface surface = EGL_NO_SURFACE;
+		EGLSurface dummySurface = EGL_NO_SURFACE;
 		EGLContext context = EGL_NO_CONTEXT;
 	};
 
@@ -115,8 +125,11 @@ namespace VaporWorldVR
 		}
 		VW_LOG_DEBUG("Picked EGL configuration");
 
-		// Create the context
-		state->context = eglCreateContext(state->display, state->config, shareCtx, NULL);
+		// Create the context.
+		// We need a GLES3.x context
+		static constexpr EGLint contextAttrs[] = {EGL_CONTEXT_CLIENT_VERSION, 3,
+		                                          EGL_NONE};
+		state->context = eglCreateContext(state->display, state->config, shareCtx, contextAttrs);
 		if (!state->context)
 		{
 			VW_LOG_ERROR("Failed to create EGL context (%#x)", eglGetError());
@@ -125,11 +138,11 @@ namespace VaporWorldVR
 		}
 
 		// Create dummy window to check everything works correctly
-		EGLint dummySurfaceAttrs[] = {EGL_WIDTH, 16,
-		                              EGL_HEIGHT, 16,
-									  EGL_NONE};
-		EGLSurface dummySurface = eglCreatePbufferSurface(state->display, state->config, dummySurfaceAttrs);
-		if (dummySurface == EGL_NO_SURFACE)
+		static constexpr EGLint dummySurfaceAttrs[] = {EGL_WIDTH, 16,
+		                                               EGL_HEIGHT, 16,
+									                   EGL_NONE};
+		state->dummySurface = eglCreatePbufferSurface(state->display, state->config, dummySurfaceAttrs);
+		if (state->dummySurface == EGL_NO_SURFACE)
 		{
 			VW_LOG_ERROR("Failed to create dummy surface (%#x); EGL initialization failed", eglGetError());
 			eglDestroyContext(state->display, state->context);
@@ -138,19 +151,17 @@ namespace VaporWorldVR
 		}
 
 		// Attempt to make context and dummy surface current
-		status = eglMakeCurrent(state->display, dummySurface, dummySurface, state->context);
+		status = eglMakeCurrent(state->display, state->dummySurface, state->dummySurface, state->context);
 		if (!status)
 		{
 			VW_LOG_ERROR("Failed to make context current (%#x); EGL initialization failed", glGetError());
-			eglDestroySurface(state->display, dummySurface);
+			eglDestroySurface(state->display, state->dummySurface);
 			eglDestroyContext(state->display, state->context);
 			state->context = EGL_NO_CONTEXT;
 			return EGL_FALSE;
 		}
 
 		VW_LOG_DEBUG("EGL successfully initialized");
-		eglMakeCurrent(state->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-		eglDestroySurface(state->display, dummySurface);
 		return status;
 	}
 
@@ -165,6 +176,12 @@ namespace VaporWorldVR
 		// Unbind context
 		status = eglMakeCurrent(state->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		VW_CHECKF(status, "Failed to unbind context (%#x)", eglGetError());
+
+		if (state->dummySurface)
+		{
+			status = eglDestroySurface(state->display, state->dummySurface);
+			VW_CHECKF(status, "Failed to destroy dummy surface (%#x)", eglGetError());
+		}
 
 		if (state->context)
 		{
@@ -183,6 +200,330 @@ namespace VaporWorldVR
 		VW_LOG_DEBUG("EGL terminated");
 		return status;
 	}
+
+
+	struct RenderCommand : public Message
+	{
+
+	};
+
+	struct RenderShutdownCmd : public Message
+	{
+		bool flushCommands;
+	};
+
+	struct RenderBeginFrameCmd : public RenderCommand
+	{
+		uint64_t frameIdx;
+	};
+
+	struct RenderEndFrameCmd : public RenderCommand
+	{
+		uint64_t frameIdx;
+		uint32_t frameFlags;
+		uint32_t swapInterval;
+		double displayTime;
+	};
+
+	struct RenderFlushCmd : public RenderCommand {};
+
+	struct RenderDrawCmd : public RenderCommand
+	{
+		VertexBuffer* vertexBuffer;
+		IndexBuffer* indexBuffer;
+		size_t drawOffset;
+		uint32_t numInstances;
+	};
+
+	struct RenderDrawIndirectCmd : public RenderCommand
+	{
+		VertexBuffer* vertexBuffer;
+		IndexBuffer* indexBuffer;
+		GPUBuffer* drawArgsBuffer;
+		size_t argsOffset;
+	};
+
+
+	class Renderer : public Runnable, public MessageTarget<Renderer,
+	                                                       RenderShutdownCmd, RenderBeginFrameCmd, RenderEndFrameCmd,
+														   RenderFlushCmd>
+	{
+	public:
+		Renderer(ovrMobile* inOvr, EGLState& inShareEglState)
+			: java{}
+			, ovr{inOvr}
+			, eglState{}
+			, shareEglState{inShareEglState}
+			, state{State_Created}
+			, numBuffers{0}
+			, useMultiView{false}
+			, numMultiSamples{1}
+			, eyeTextureType{VRAPI_TEXTURE_TYPE_2D}
+			, eyeTextureSize{}
+			, requestExit{false}
+		{}
+
+		FORCE_INLINE void setJavaInfo(JavaVM* jvm, jobject activity)
+		{
+			java.Vm = jvm;
+			java.ActivityObject = activity;
+		}
+
+		void processMessage(RenderShutdownCmd const& cmd)
+		{
+			if (cmd.flushCommands)
+			{
+				// Force renderer to flush remaining messages
+				// TODO: Flush
+			}
+
+			// Set exit flag
+			requestExit = true;
+		}
+
+		FORCE_INLINE void processMessage(RenderBeginFrameCmd const& cmd)
+		{
+			VW_LOG_DEBUG_IF(cmd.frameIdx % 1000 == 0, "=== BEGIN FRAME %llu ===", (unsigned long long)cmd.frameIdx);
+		}
+
+		FORCE_INLINE void processMessage(RenderEndFrameCmd const& cmd)
+		{
+			VW_LOG_DEBUG_IF(cmd.frameIdx % 1000 == 0, "=== END FRAME %llu ===", (unsigned long long)cmd.frameIdx);
+
+			// TODO: Remove, just an experiment
+			ovrLayerProjection2 clearLayer = vrapi_DefaultLayerBlackProjection2();
+			clearLayer.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_INHIBIT_SRGB_FRAMEBUFFER;
+
+			ovrLayerHeader2 const* layers[] = {&clearLayer.Header};
+
+			ovrSubmitFrameDescription2 frameDesc{};
+			frameDesc.Flags = cmd.frameFlags;
+			frameDesc.FrameIndex = cmd.frameIdx;
+			frameDesc.SwapInterval = cmd.swapInterval;
+			frameDesc.DisplayTime = cmd.displayTime;
+			frameDesc.LayerCount = 1;
+			frameDesc.Layers = layers;
+
+			vrapi_SubmitFrame2(ovr, &frameDesc);
+		}
+
+		void processMessage(RenderFlushCmd const& cmd)
+		{
+			// TODO: Flush
+		}
+
+	protected:
+		enum State : uint8_t
+		{
+			State_Created,
+			State_Started,
+			State_Idle,
+			State_Busy,
+			State_Stopped
+		};
+
+		struct Framebuffer
+		{
+			uint32_t width;
+			uint32_t height;
+			bool useMultiView;
+			uint8_t numMultiSamples;
+			uint8_t textureSwapChainLen;
+			uint8_t textureSwapChainIdx;
+			ovrTextureSwapChain* colorTextureSwapChain;
+			GLuint depthBuffers[VW_TEXTURE_SWAPCHAIN_MAX_LEN];
+			GLuint fbos[VW_TEXTURE_SWAPCHAIN_MAX_LEN];
+		};
+
+		ovrJava java;
+		ovrMobile* ovr;
+		EGLState eglState;
+		EGLState& shareEglState;
+		Framebuffer framebuffers[VRAPI_FRAME_LAYER_EYE_MAX];
+		State state;
+		uint8_t numBuffers;
+		bool useMultiView;
+		uint8_t numMultiSamples;
+		ovrTextureType eyeTextureType;
+		uint2 eyeTextureSize;
+		bool requestExit;
+
+		virtual void run() override
+		{
+			// Set up renderer
+			setup();
+
+			for (;;)
+			{
+				flushMessages(true);
+
+				if (requestExit)
+					// Shut down render thread
+					break;
+			}
+
+			// Tear down renderer
+			teardown();
+		}
+
+		void setup()
+		{
+			state = State_Started;
+			VW_LOG_DEBUG("Renderer started");
+
+			// Attach current thread
+			java.Vm->AttachCurrentThread(&java.Env, nullptr);
+
+			// Initialize EGL
+			initEGL(&eglState, shareEglState.context);
+
+			// Create framebuffers
+			setupFramebuffers();
+		}
+
+		void teardown()
+		{
+			// Destroy framebuffers
+			teardownFramebuffers();
+
+			// Terminate EGL
+			terminateEGL(&eglState);
+
+			// Deatch thread
+			java.Vm->DetachCurrentThread();
+
+			state = State_Stopped;
+			VW_LOG_DEBUG("Renderer stopped");
+		}
+
+		int setupFramebuffers()
+		{
+			int status = GL_NO_ERROR;
+
+			// Get suggested fbo size
+			eyeTextureSize.x = vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_SUGGESTED_EYE_TEXTURE_WIDTH);
+			eyeTextureSize.y = vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_SUGGESTED_EYE_TEXTURE_HEIGHT);
+			VW_LOG_DEBUG("Suggested eye texture's size is <%u, %u>", eyeTextureSize.x, eyeTextureSize.y);
+
+			// Multi view means we render to a single 2D texture array, so we only need one framebuffer
+			numBuffers = VRAPI_FRAME_LAYER_EYE_MAX;
+			eyeTextureType = VRAPI_TEXTURE_TYPE_2D;
+			if (useMultiView)
+			{
+				VW_LOG_DEBUG("Using multi-view rendering feature");
+				numBuffers = 1;
+				eyeTextureType = VRAPI_TEXTURE_TYPE_2D_ARRAY;
+			}
+
+			for (int eyeIdx = 0; eyeIdx < numBuffers; ++eyeIdx)
+			{
+				// Setup individual framebuffers
+				constexpr int64_t colorFormat = GL_RGBA8;
+				constexpr int levels = 1;
+				constexpr int bufferCount = 3;
+				Framebuffer& fb = framebuffers[eyeIdx];
+				fb.width = eyeTextureSize.x;
+				fb.height = eyeTextureSize.y;
+				fb.numMultiSamples = numMultiSamples;
+				fb.useMultiView = useMultiView;
+				fb.colorTextureSwapChain = vrapi_CreateTextureSwapChain3(eyeTextureType, colorFormat, fb.width,
+				                                                         fb.height, levels, bufferCount);
+				fb.textureSwapChainLen = vrapi_GetTextureSwapChainLength(fb.colorTextureSwapChain);
+
+				// Gen buffers and framebuffer objects
+				glGenTextures(fb.textureSwapChainLen, fb.depthBuffers);
+				glGenFramebuffers(fb.textureSwapChainLen, fb.fbos);
+
+				for (int i = 0; i < fb.textureSwapChainLen; ++i)
+				{
+					// This returns the i-th color texture in the swapchain
+					GLuint colorTexture = vrapi_GetTextureSwapChainHandle(fb.colorTextureSwapChain, i);
+
+					// Create the color texture
+					GLuint const textureTarget = eyeTextureType == VRAPI_TEXTURE_TYPE_2D_ARRAY
+					                           ? GL_TEXTURE_2D_ARRAY
+											   : GL_TEXTURE_2D;
+					glBindTexture(textureTarget, colorTexture);
+					glTexParameteri(textureTarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+					glTexParameteri(textureTarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+					glTexParameteri(textureTarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+					glTexParameteri(textureTarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+					glBindTexture(textureTarget, 0);
+
+					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.fbos[i]);
+
+					if (fb.useMultiView)
+					{
+						VW_LOG_ERROR("Multi-view rendering not implemented");
+						return -1;
+						// Create the depth texture
+						glBindTexture(GL_TEXTURE_2D_ARRAY, fb.depthBuffers[i]);
+						glTexStorage3D(GL_TEXTURE_2D_ARRAY, levels, GL_DEPTH_COMPONENT, fb.width, fb.height,
+						               VRAPI_FRAME_LAYER_EYE_MAX);
+						glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+						if (fb.numMultiSamples > 1)
+						{
+
+						}
+						else
+						{
+
+						}
+					}
+					else
+					{
+						// Create the depth texture
+						glBindTexture(GL_TEXTURE_2D, fb.depthBuffers[i]);
+						glTexStorage2D(GL_TEXTURE_2D, levels, GL_DEPTH_COMPONENT, fb.width, fb.height);
+						glBindTexture(GL_TEXTURE_2D, 0);
+
+						if (fb.numMultiSamples >  1)
+						{
+							VW_LOG_ERROR("MSAA rendering not implemented");
+							return -1;
+						}
+						else
+						{
+							glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+							                       colorTexture, 0);
+							glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+							                       fb.depthBuffers[i], 0);
+						}
+					}
+
+					// In debug, check the status of the framebuffer
+					status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+					VW_CHECKF(status == GL_FRAMEBUFFER_COMPLETE, "Incomplete fbo (%s)",
+					           GL::getFramebufferStatusString(status));
+					if (status == 0)
+					{
+						VW_LOG_ERROR("Failed to create framebuffer object");
+						GL::flushErrors();
+						return status;
+					}
+
+					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+				}
+			}
+
+			VW_LOG_DEBUG("Framebuffers setup completed");
+			return status;
+		}
+
+		void teardownFramebuffers()
+		{
+			for (int eyeIdx = 0; eyeIdx < numBuffers; ++eyeIdx)
+			{
+				// Delete GL resources
+				Framebuffer& fb = framebuffers[eyeIdx];
+				glDeleteFramebuffers(fb.textureSwapChainLen, fb.fbos);
+				glDeleteTextures(fb.textureSwapChainLen, fb.depthBuffers);
+			}
+
+			VW_LOG_DEBUG("Framebuffers teardown completed");
+		}
+	};
 
 
 	struct ApplicationEvent : public Message
@@ -212,76 +553,76 @@ namespace VaporWorldVR
 	class Application : public MessageTarget<Application, ApplicationEvent>, public Runnable
 	{
 	public:
-		Application(JNIEnv* env, jobject activity)
+		Application()
 			: nativeWindow{nullptr}
-			, java{.Env = env}
+			, java{}
 			, ovr{nullptr}
 			, eglState{}
 			, frameCounter{0}
 			, requestExit{false}
 			, resumed{false}
-		{
-			// Get java env properties
-			env->GetJavaVM(&java.Vm);
-			java.ActivityObject = env->NewGlobalRef(activity);
-		}
-
-		~Application()
-		{
-			java.Env->DeleteGlobalRef(java.ActivityObject);
-			java.Vm = nullptr;
-			java.Env = nullptr;
-		}
+		{}
 
 		FORCE_INLINE ANativeWindow const* getNativeWindow() const
 		{
 			return nativeWindow;
 		}
 
-		virtual void setup() override
+		FORCE_INLINE ovrJava const& getJavaInfo() const
 		{
-			// Setup Java env
-			VW_ASSERT(java.Vm)
-			VW_ASSERT(java.Env)
-			VW_ASSERT(java.ActivityObject)
-			java.Vm->AttachCurrentThread(&java.Env, NULL);
-
-			// Init Oculus API
-			ovrInitParms initParams = vrapi_DefaultInitParms(&java);
-			auto status = vrapi_Initialize(&initParams);
-			if (status != VRAPI_INITIALIZE_SUCCESS)
-			{
-				VW_LOG_ERROR("Failed to initialize vrApi");
-				exit(0);
-			}
-
-			// Create the EGL context
-			initEGL(&eglState, nullptr);
+			return java;
 		}
 
-		virtual void teardown() override
+		FORCE_INLINE void setJavaInfo(JavaVM* jvm, jobject activity)
 		{
-			// Destroy the EGL context
-			terminateEGL(&eglState);
-
-			// Shutdown VR API and detach thread
-			vrapi_Shutdown();
-			java.Vm->DetachCurrentThread();
+			java.Vm = jvm;
+			java.ActivityObject = activity;
 		}
 
 		virtual void run() override
 		{
+			// Set up application
+			setup();
 
 			while (!requestExit)
 			{
-				flushMessages(true);
+				// Called once per frame to process application events.
+				// If we are not in VR mode, block on waiting for new messages
+				bool const blocking = ovr == nullptr;
+				flushMessages(blocking);
+
+				// Update the state of the application
+				updateApplicationState();
 
 				if (!ovr)
-				{
 					// Skip if not in VR mode yet
 					continue;
-				}
+
+				// Increment frame counter, before predicting the display time
+				frameCounter++;
+
+				// Predict display time and HMD pose
+				displayTime = vrapi_GetPredictedDisplayTime(ovr, frameCounter);
+
+				// Begin next frame.
+				RenderBeginFrameCmd beginFrameCmd{};
+				beginFrameCmd.frameIdx = frameCounter;
+				renderer->postMessage(beginFrameCmd);
+
+				// TODO: Render scene
+				::usleep(1000);
+
+				// End current frame.
+				static constexpr uint32_t swapInterval = 1;
+				RenderEndFrameCmd endFrameCmd{};
+				endFrameCmd.frameIdx = frameCounter;
+				endFrameCmd.displayTime = displayTime;
+				endFrameCmd.swapInterval = swapInterval;
+				renderer->postMessage(endFrameCmd, MessageWait_Received);
 			}
+
+			// Tear down application
+			teardown();
 		}
 
 		void processMessage(ApplicationEvent const& msg)
@@ -308,7 +649,7 @@ namespace VaporWorldVR
 
 			case ApplicationEvent::Type_Destroyed:
 			{
-				VW_LOG_DEBUG("Application destroyed");
+				VW_LOG_DEBUG("Application shutdown requested");
 				requestExit = true;
 			}
 			break;
@@ -328,11 +669,9 @@ namespace VaporWorldVR
 			break;
 
 			default:
-				VW_LOG_WARN("Unkown event type (%d)", msg.type);
+				VW_LOG_WARN("Unkown event type '%d'", msg.type);
 				break;
 			}
-
-			updateApplicationState();
 		}
 
 	protected:
@@ -340,9 +679,61 @@ namespace VaporWorldVR
 		ovrJava java;
 		ovrMobile* ovr;
 		EGLState eglState;
+		Renderer* renderer;
 		uint64_t frameCounter;
+		double displayTime;
 		bool requestExit;
 		bool resumed;
+
+		void setup()
+		{
+			// Setup Java env
+			VW_ASSERT(java.Vm)
+			VW_ASSERT(java.ActivityObject)
+			java.Vm->AttachCurrentThread(&java.Env, nullptr);
+
+			// Init Oculus API
+			ovrInitParms initParams = vrapi_DefaultInitParms(&java);
+			auto status = vrapi_Initialize(&initParams);
+			if (status != VRAPI_INITIALIZE_SUCCESS)
+			{
+				VW_LOG_ERROR("Failed to initialize vrApi");
+				exit(0);
+			}
+
+			// Create the EGL context
+			initEGL(&eglState, nullptr);
+
+			// Create the render thread
+			renderer = new Renderer{ovr, eglState};
+			renderer->setJavaInfo(java.Vm, java.ActivityObject);
+
+			auto* renderThread = createRunnableThread(renderer);
+			renderThread->setName("VW_RenderThread");
+			renderThread->start();
+
+			VW_LOG_DEBUG("Application setup completed");
+		}
+
+		void teardown()
+		{
+			// Stop the render thread
+			renderer->postMessage<RenderShutdownCmd>({}, MessageWait_Processed);
+			auto* renderThread = renderer->getThread();
+			renderThread->join();
+			destroyRunnableThread(renderThread);
+
+			delete renderer;
+
+			// Destroy the EGL context
+			terminateEGL(&eglState);
+
+			// Shutdown VR API and detach thread
+			vrapi_Shutdown();
+			java.Vm->DetachCurrentThread();
+
+			VW_LOG_DEBUG("Application teardown completed");
+		}
 
 		void updateApplicationState()
 		{
@@ -385,12 +776,17 @@ static void* createApplication(JNIEnv* env, jobject activity)
 {
 	using namespace VaporWorldVR;
 
-	auto* app = new Application{env, activity};
+	// Get the JVM instance
+	JavaVM* jvm = nullptr;
+	env->GetJavaVM(&jvm);
+
+	auto* app = new Application;
+	app->setJavaInfo(jvm, env->NewGlobalRef(activity));
 
 	auto* appThread = createRunnableThread(app);
-	appThread->setName("VaporWorldVR::MainThread");
+	appThread->setName("VW_AppThread");
 	appThread->start();
-	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Created});
+	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Created}, MessageWait_Processed);
 	return reinterpret_cast<void*>(app);
 }
 
@@ -399,7 +795,7 @@ static void resumeApplication(void* handle)
 	using namespace VaporWorldVR;
 
 	auto* app = reinterpret_cast<Application*>(handle);
-	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Resumed});
+	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Resumed}, MessageWait_Processed);
 }
 
 static void pauseApplication(void* handle)
@@ -407,18 +803,19 @@ static void pauseApplication(void* handle)
 	using namespace VaporWorldVR;
 
 	auto* app = reinterpret_cast<Application*>(handle);
-	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Paused});
+	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Paused}, MessageWait_Processed);
 }
 
-static void destroyApplication(void* handle)
+static void destroyApplication(JNIEnv* env, void* handle)
 {
 	using namespace VaporWorldVR;
 
 	auto* app = reinterpret_cast<Application*>(handle);
-	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Destroyed});
+	app->postMessage<ApplicationEvent>({ApplicationEvent::Type_Destroyed}, MessageWait_Processed);
 	auto* appThread = app->getThread();
 	appThread->join();
 	destroyRunnableThread(appThread);
+
 	delete app;
 }
 
@@ -435,16 +832,15 @@ static ANativeWindow* setApplicationWindow(void* handle, ANativeWindow* newNativ
 	if (app->getNativeWindow())
 	{
 		// Destroy the current window
-		constexpr bool ackRvcd = true;
-		app->postMessage<ApplicationEvent>({ApplicationEvent::Type_SurfaceDestroyed}/* , ackRcvd */);
 		oldWindow = const_cast<ANativeWindow*>(app->getNativeWindow());
+		app->postMessage<ApplicationEvent>({ApplicationEvent::Type_SurfaceDestroyed}, MessageWait_Processed);
 	}
 
 	if (newNativeWindow)
 	{
 		// Create the new window
-		constexpr bool ackRvcd = true;
-		app->postMessage<ApplicationEvent>({ApplicationEvent::Type_SurfaceCreated, newNativeWindow}/* , ackRcvd */);
+		app->postMessage<ApplicationEvent>({ApplicationEvent::Type_SurfaceCreated, newNativeWindow},
+		                                   MessageWait_Processed);
 	}
 
 	return oldWindow;
@@ -486,7 +882,7 @@ JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onStop(JNIEnv* 
 JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onDestroy(JNIEnv* env, jobject obj, jlong handle)
 {
 	void* app = (void*)handle;
-	destroyApplication(app);
+	destroyApplication(env, app);
 }
 
 /* Called after the surface is created. */
@@ -496,7 +892,7 @@ JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onSurfaceCreate
 	// Get a new native window from surface
 	ANativeWindow* nativeWindow = ANativeWindow_fromSurface(env, surface);
 	ANativeWindow* oldNativeWindow = setApplicationWindow((void*)handle, nativeWindow);
-	VW_CHECK(oldNativeWindow != nativeWindow);
+	VW_CHECK(oldNativeWindow == NULL);
 }
 
 /* Called after the surface changes. */
@@ -519,7 +915,7 @@ JNIEXPORT void JNICALL Java_com_vaporworldvr_VaporWorldVRWrapper_onSurfaceDestro
                                                                                   jlong handle)
 {
 	ANativeWindow* oldNativeWindow = setApplicationWindow((void*)handle, NULL);
-	VW_ASSERT(oldNativeWindow != nullptr);
+	VW_ASSERT(oldNativeWindow != NULL);
 	ANativeWindow_release(oldNativeWindow);
 }
 #ifdef __cplusplus
