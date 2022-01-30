@@ -95,45 +95,23 @@ namespace VaporWorldVR
 		 * The target object will process the message the next time it calls
 		 * flushMessages().
 		 *
+		 * @tparam MessageT The type of the message to send
 		 * @param msg The message to post
 		 * @param flags Used to request acks from the target
+		 * @{
 		 */
 		template<typename MessageT>
-		void postMessage(MessageT&& msg, int flags = MessageWait_None)
+		void postMessage(MessageT const& msg, int sendFlags = MessageWait_None)
 		{
-			mutex->lock();
-			{
-				// Push to queue
-				auto* wrapper = new MessageWrapper{FORWARD(msg), flags};
-				tail = tail->next = wrapper;
-
-				// Notify target
-				eventSent->notifyOne();
-
-				if ((flags & MessageWait_Received) == MessageWait_Received)
-				{
-					acquireRef(wrapper);
-					while ((wrapper->ackFlags & AckFlag_Received) != AckFlag_Received)
-					{
-						// Wait for the received event to trigger and check again
-						eventRcvd->wait(mutex);
-					}
-					releaseRef(wrapper);
-				}
-
-				if ((flags & MessageWait_Processed) == MessageWait_Processed)
-				{
-					acquireRef(wrapper);
-					while ((wrapper->ackFlags & AckFlag_Processed) != AckFlag_Processed)
-					{
-						// Wait for the processed event to trigger and check again
-						eventProc->wait(mutex);
-					}
-					releaseRef(wrapper);
-				}
-			}
-			mutex->unlock();
+			postMessage_Impl(msg, sendFlags);
 		}
+
+		template<typename MessageT>
+		void postMessage(MessageT&& msg, int sendFlags = MessageWait_None)
+		{
+			postMessage_Impl(::std::move(msg), sendFlags);
+		}
+		/// @}
 
 		/**
 		 * @brief Process the message queue.
@@ -238,6 +216,42 @@ namespace VaporWorldVR
 
 		/* Event fired after a message that requires a ack is processed. */
 		Event* eventProc;
+
+		FORCE_INLINE void postMessage_Impl(auto&& msg, int sendFlags)
+		{
+			mutex->lock();
+			{
+				// Push to queue
+				auto* wrapper = new MessageWrapper{FORWARD(msg), sendFlags};
+				tail = tail->next = wrapper;
+
+				// Notify target
+				eventSent->notifyOne();
+
+				if ((sendFlags & MessageWait_Received) == MessageWait_Received)
+				{
+					acquireRef(wrapper);
+					while ((wrapper->ackFlags & AckFlag_Received) != AckFlag_Received)
+					{
+						// Wait for the received event to trigger and check again
+						eventRcvd->wait(mutex);
+					}
+					releaseRef(wrapper);
+				}
+
+				if ((sendFlags & MessageWait_Processed) == MessageWait_Processed)
+				{
+					acquireRef(wrapper);
+					while ((wrapper->ackFlags & AckFlag_Processed) != AckFlag_Processed)
+					{
+						// Wait for the processed event to trigger and check again
+						eventProc->wait(mutex);
+					}
+					releaseRef(wrapper);
+				}
+			}
+			mutex->unlock();
+		}
 
 		FORCE_INLINE void acquireRef(MessageWrapper* wrapper)
 		{
