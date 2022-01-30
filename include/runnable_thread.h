@@ -13,6 +13,14 @@ namespace VaporWorldVR
 
 
 	/**
+	 * @brief Returns the RunnableThread that is currently executing.
+	 *
+	 * If the current thread is not a RunnableThread, it returns null.
+	 */
+	RunnableThread* getCurrentRunnableThread();
+
+
+	/**
 	 * @brief Interface to implement runnable tasks.
 	 *
 	 * @see RunnableThread
@@ -38,20 +46,6 @@ namespace VaporWorldVR
 		 * Derived classes must provide an implementation for this method.
 		 */
 		virtual void run() = 0;
-
-		/**
-		 * @brief Called before run() to setup the runnable.
-		 *
-		 * Called from the containing thread.
-		 */
-		virtual void setup() {};
-
-		/**
-		 * @brief Called after run() to perform teardown.
-		 *
-		 * Called from the containing thread.
-		 */
-		virtual void teardown() {};
 
 	protected:
 		/* Pointer that points to the thread this task is running on. */
@@ -166,6 +160,14 @@ namespace VaporWorldVR
 		{
 			static_assert(::std::is_base_of<Runnable, RunnableT>::value, "RunnableT must be a Runnable type");
 			return dynamic_cast<RunnableT*>(runnable);
+		}
+
+		/**
+		 * @brief Alias for getCurrentRunnableThread.
+		 */
+		FORCE_INLINE static RunnableThread* getCurrent()
+		{
+			return getCurrentRunnableThread();
 		}
 
 	protected:
