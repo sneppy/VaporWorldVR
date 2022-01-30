@@ -16,6 +16,10 @@ LOCAL_CPPFLAGS += -std=c++2a -Werror
 LOCAL_LDLIBS := -lEGL -lGLESv3 -landroid -llog
 LOCAL_SHARED_LIBRARIES := vrapi
 
+# Required to enable ASan (Address Sanitizer)
+# See https://developer.android.com/ndk/guides/asan
+#LOCAL_ARM_MODE := arm
+
 # This script builds the shared library
 include $(BUILD_SHARED_LIBRARY)
 
