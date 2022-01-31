@@ -97,13 +97,13 @@ namespace VaporWorldVR::Math
 		 */
 		constexpr FORCE_INLINE Mat4& transpose()
 		{
-			return *this = getTranposed();
+			return *this = getTransposed();
 		}
 
 		/**
 		 * @brief Returns the transposed matrix.
 		 */
-		constexpr FORCE_INLINE Mat4 getTranposed() const
+		constexpr FORCE_INLINE Mat4 getTransposed() const
 		{
 			return {rows[0][0], rows[1][0], rows[2][0], rows[3][0],
 			        rows[0][0], rows[1][0], rows[2][0], rows[3][0],
