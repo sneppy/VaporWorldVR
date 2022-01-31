@@ -4,6 +4,7 @@ obj/
 .gradle/
 .cxx/
 *.keystore
+compile_commands.json
 
 # Oculus Mobile SDK
 /ovr_sdk_mobile/

@@ -7,7 +7,8 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := vaporworldvr
 LOCAL_SRC_FILES := ../../../src/vaporworldvr.cpp\
                    ../../../src/runnable_thread.cpp\
-                   ../../../src/thread_utils.cpp
+                   ../../../src/thread_utils.cpp\
+                   ../../../src/collision_utils.cpp
 LOCAL_CPP_FEATURES := rtti
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../include\
                     $(LOCAL_PATH)/../../../external/gcem/include

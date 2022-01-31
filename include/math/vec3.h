@@ -40,6 +40,9 @@ namespace VaporWorldVR::Math
 			/* Vector coordinates. */
 			struct { T x, y, z; };
 
+			/* A Vec2 with the first two coordinates. */
+			Vec2<T> xy;
+
 			/* Vector coordinates as an array. */
 			T coords[3];
 		};
@@ -350,9 +353,9 @@ namespace VaporWorldVR::Math
 		/**
 		 * @brief Converts this Vec3 to a Vec2 by dropping the Z coordinate.
 		 */
-		constexpr FORCE_INLINE operator Vec2<T>() const
+		constexpr FORCE_INLINE operator Vec2<T> const&() const
 		{
-			return {x, y};
+			return xy;
 		}
 	};
 

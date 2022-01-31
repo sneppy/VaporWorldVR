@@ -24,6 +24,9 @@ namespace VaporWorldVR::Math
 			/* Vector space coordinates. */
 			struct { T x, y, z, w; };
 
+			/* A Vec3 with the first three coordinates. */
+			Vec3<T> xyz;
+
 			/* Vector coordinates array. */
 			T coords[4];
 		};
@@ -325,9 +328,9 @@ namespace VaporWorldVR::Math
 		/**
 		 * @brief Converts this Vec4 to a Vec3 by dropping the Z coordinate.
 		 */
-		constexpr FORCE_INLINE operator Vec3<T>() const
+		constexpr FORCE_INLINE operator Vec3<T> const&() const
 		{
-			return {x, y, z};
+			return xyz;
 		}
 	};
 
