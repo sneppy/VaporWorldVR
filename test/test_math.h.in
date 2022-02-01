@@ -1,0 +1,12 @@
+#pragma once
+
+#include "gtest/gtest.h"
+
+
+using namespace VaporWorldVR;
+
+
+TEST(@TEST_NAME@, @TEST_NAME@)
+{
+	SUCCEED();
+}
