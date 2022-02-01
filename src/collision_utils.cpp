@@ -35,11 +35,11 @@ namespace VaporWorldVR
 
 		/* Returns true if the given point is within the frustum defined by the
 		   given planes. The order of the planes does not matter. */
-		static bool frustumTest_Impl(float4 const planes[], float3 const& pos)
+		static bool frustumTest_Impl(float4 const planes[], float3 const& pos, float radius)
 		{
 			for (int i = 0; i < 6; ++i)
 			{
-				if (pos.dot(planes[i].xyz) + planes[i].w < 0.f)
+				if (pos.dot(planes[i].xyz) + planes[i].w + radius < 0.f)
 					// Point is outside of frustum
 					return false;
 			}
@@ -108,29 +108,12 @@ namespace VaporWorldVR
 		return raySphereIntersect(rayStart, rayDir, sphereOrigin, sphereRadius, _[0], _[1]);
 	}
 
-	bool frustumTest(float4x4 const& frustum, float3 const& pos)
-	{
-		// Get frustum planes
-		float4 planes[6];
-		getFrustumTPlanes(planes, frustum.getTransposed());
-
-		return frustumTest_Impl(planes, pos);
-	}
-
 	bool frustumSphereOverlapTest(float4x4 const& frustum, float3 const& origin, float radius)
 	{
 		// Get frustum planes
 		float4 planes[6];
 		getFrustumTPlanes(planes, frustum.getTransposed());
-
-		for (int i = 0; i < 6; ++i)
-		{
-			if (origin.dot(planes[i].xyz) + planes[i].w + radius < 0.f)
-				// Sphere does not overlap with frustum
-				return false;
-		}
-
-		return true;
+		return frustumTest_Impl(planes, origin, radius);
 	}
 
 	bool frustumAABBOverlapTest(float4x4 const& frustum, float3 const& min, float3 const& max)
@@ -145,7 +128,7 @@ namespace VaporWorldVR
 
 		for (int i = 0; i < 8; ++i)
 		{
-			if (frustumTest_Impl(planes, vertices[0]))
+			if (frustumTest_Impl(planes, vertices[0], 0.f))
 				// At least one vertex overlaps
 				return true;
 		}

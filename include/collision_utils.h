@@ -77,27 +77,17 @@ namespace VaporWorldVR
 	                            float sphereRadius);
 
 	/**
-	 * @brief This method tests if a point overlaps a given camera frustum.
-	 *
-	 * @param frustum The frustum matrix (usually this is the combination of
-	 *                the view and projection matrices)
-	 * @param pos The position of the point tot est
-	 * @return true if the point overlaps with the frustum
-	 * @return false otherwise
-	 */
-	bool frustumTest(float4x4 const& frustum, float3 const& pos);
-
-	/**
 	 * @brief This method tests if a sphere overlaps with the given camera
 	 * frustum.
 	 *
 	 * @param frustum The frustum matrix
 	 * @param origin The position of center of the sphere
-	 * @param radius The radius of the sphere
+	 * @param radius The radius of the sphere. If not specified, the default
+	 *               value is zero
 	 * @return true if the sphere overlaps with the frustum
 	 * @return false otherwise
 	 */
-	bool frustumSphereOverlapTest(float4x4 const& frustum, float3 const& origin, float radius);
+	bool frustumSphereOverlapTest(float4x4 const& frustum, float3 const& origin, float radius = 0.f);
 
 	/**
 	 * @brief This method tests if a AABB object overlaps with the given camera
