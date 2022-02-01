@@ -1,6 +1,8 @@
 #pragma once
 
 #include "math/vec3.h"
+#include "math/vec4.h"
+#include "math/mat4.h"
 
 
 namespace VaporWorldVR
@@ -73,4 +75,41 @@ namespace VaporWorldVR
 	 */
 	bool raySphereIntersectTest(float3 const& rayStart, float3 const& rayDir, float3 const& sphereOrigin,
 	                            float sphereRadius);
+
+	/**
+	 * @brief This method tests if a point overlaps a given camera frustum.
+	 *
+	 * @param frustum The frustum matrix (usually this is the combination of
+	 *                the view and projection matrices)
+	 * @param pos The position of the point tot est
+	 * @return true if the point overlaps with the frustum
+	 * @return false otherwise
+	 */
+	bool frustumTest(float4x4 const& frustum, float3 const& pos);
+
+	/**
+	 * @brief This method tests if a sphere overlaps with the given camera
+	 * frustum.
+	 *
+	 * @param frustum The frustum matrix
+	 * @param origin The position of center of the sphere
+	 * @param radius The radius of the sphere
+	 * @return true if the sphere overlaps with the frustum
+	 * @return false otherwise
+	 */
+	bool frustumSphereOverlapTest(float4x4 const& frustum, float3 const& origin, float radius);
+
+	/**
+	 * @brief This method tests if a AABB object overlaps with the given camera
+	 * frustum.
+	 *
+	 * The box overlaps if at least one of its vertices overlaps.
+	 *
+	 * @param frustum The frustum matrix
+	 * @param min The first corner of the AABB to test
+	 * @param max The second corner of the AABB to test
+	 * @return true if the AABB overlaps with the frustum
+	 * @return false otherwise
+	 */
+	bool frustumAABBOverlapTest(float4x4 const& frustum, float3 const& min, float3 const& max);
 } // namespace VaporWorldVR
