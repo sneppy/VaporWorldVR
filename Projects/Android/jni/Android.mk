@@ -17,7 +17,7 @@ LOCAL_CPPFLAGS += -std=c++2a -Werror
 LOCAL_LDLIBS := -lEGL -lGLESv3 -landroid -llog
 LOCAL_SHARED_LIBRARIES := vrapi
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_C_INCLUDES)
-LOCAL_EXPORT_LDLIBS := $(LOCAL_LD_LIBS)
+LOCAL_EXPORT_LDLIBS := $(LOCAL_LDLIBS)
 
 # Required to enable ASan (Address Sanitizer)
 # See https://developer.android.com/ndk/guides/asan
