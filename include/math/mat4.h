@@ -256,7 +256,7 @@ namespace VaporWorldVR::Math
 		 */
 		constexpr FORCE_INLINE Mat4 dot(Mat4 const& other) const
 		{
-			return Mat4{*this}.dot_Impl(other.getTranposed());
+			return Mat4{*this}.dot_Impl(other.getTransposed());
 		}
 
 		/**
