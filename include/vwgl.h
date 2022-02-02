@@ -1,13 +1,21 @@
 #pragma once
 
-#include <GLES3/gl3.h>
+#include <string>
+
+#include <GLES3/gl32.h>
 #include <GLES3/gl3ext.h>
 
 #include "core_types.h"
 #include "logging.h"
 
 
-#define SWITCH_CASE(err) case err: #err;
+#if VW_BUILD_DEBUG
+# define GL_CHECK_ERRORS GL::flushErrors(__FILE__, __LINE__)
+#else
+# define GL_CHECK_ERRORS
+#endif
+
+#define SWITCH_CASE(err) case err: return #err;
 
 
 namespace VaporWorldVR::GL
@@ -43,12 +51,12 @@ namespace VaporWorldVR::GL
 	/**
 	 * @brief Prints all pending GLES errors.
 	 */
-	FORCE_INLINE void flushErrors()
+	FORCE_INLINE void flushErrors(char const* const filename, int lineno)
 	{
 		GLenum err = GL_NO_ERROR;
 		while ((err = glGetError()) != GL_NO_ERROR)
 		{
-			VW_LOG_ERROR("GLES error (%s)", getErrorString(err));
+			VW_LOG_ERROR("%s:%d: Encountered GLES error #%u (%s)", filename, lineno, err, getErrorString(err));
 		}
 	}
 
@@ -70,6 +78,32 @@ namespace VaporWorldVR::GL
 		SWITCH_CASE(GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE)
 		default: return "N/A";
 		}
+	}
+
+	/**
+	 * @brief Returns the log of the shader compilation.
+	 *
+	 * @param shader The name of the shader resource
+	 * @return String with shader log
+	 */
+	::std::string getShaderLog(GLuint shader)
+	{
+		// Query log size (includes the NULL terminator)
+		GLsizei logSize = 0;
+		glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logSize);
+		if (logSize == 0)
+			return "";
+
+		// Get log
+		::std::string log;
+		log.resize(logSize - 1);
+		glGetShaderInfoLog(shader, logSize, &logSize, &log[0]);
+		VW_CHECK(logSize == log.size());
+
+		// Strip trailing newlines
+		log.erase(logSize - 1);
+
+		return log;
 	}
 } // namespace VaporWorldVR::GL
 

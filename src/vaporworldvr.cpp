@@ -25,8 +25,49 @@
 #define VW_TEXTURE_SWAPCHAIN_MAX_LEN 16
 
 
+static char const shaderVersionString[] = "#version 310 es\n";
+static char const shaderCommonTypesString[] =
+	"struct ViewInfo"
+	"{"
+	"	mat4 worldToView;"
+	"	mat4 viewToClip;"
+	"	mat4 worldToClip;"
+	"};";
+static char const vertexShaderString[] =
+	"in vec3 vertexPosition;"
+
+	"layout(std430, binding = 0) buffer ViewInfoBuffer"
+	"{"
+	"	ViewInfo viewInfo;"
+	"};"
+
+	"void main()"
+	"{"
+	"	gl_Position = viewInfo.worldToView * viewInfo.viewToClip * vec4(vertexPosition * 0.05f, 1.f);"
+	"}";
+static char const fragmentShaderString[] =
+	"out lowp vec4 outColor;"
+
+	"void main()"
+	"{"
+	"	outColor = vec4(1.f);"
+	"}";
+
+
 namespace VaporWorldVR
 {
+	static FORCE_INLINE void logMatrix(float4x4 const& m)
+	{
+		VW_LOG_DEBUG("[%g, %g, %g, %g,\n"
+		             " %g, %g, %g, %g,\n"
+		             " %g, %g, %g, %g,\n"
+		             " %g, %g, %g, %g,\n",
+					 m[0][0], m[0][1], m[0][2], m[0][3],
+					 m[1][0], m[1][1], m[1][2], m[1][3],
+					 m[2][0], m[2][1], m[2][2], m[2][3],
+					 m[3][0], m[3][1], m[3][2], m[3][3]);
+	}
+
 	class Application;
 	class Renderer;
 	class Scene;
@@ -209,7 +250,7 @@ namespace VaporWorldVR
 
 	struct RenderShutdownCmd : public Message
 	{
-		bool flushCommands;
+		//
 	};
 
 	struct RenderBeginFrameCmd : public RenderCommand
@@ -223,15 +264,19 @@ namespace VaporWorldVR
 		uint32_t frameFlags;
 		uint32_t swapInterval;
 		double displayTime;
+		ovrTracking2 tracking;
 	};
 
 	struct RenderFlushCmd : public RenderCommand {};
 
 	struct RenderDrawCmd : public RenderCommand
 	{
-		VertexBuffer* vertexBuffer;
-		IndexBuffer* indexBuffer;
+		GLenum primitiveType;
+		GLuint vertexBuffer;
+		GLuint indexBuffer;
+		size_t numElements;
 		size_t drawOffset;
+		// Ignored
 		uint32_t numInstances;
 	};
 
@@ -246,7 +291,7 @@ namespace VaporWorldVR
 
 	class Renderer : public Runnable, public MessageTarget<Renderer,
 	                                                       RenderShutdownCmd, RenderBeginFrameCmd, RenderEndFrameCmd,
-														   RenderFlushCmd>
+														   RenderFlushCmd, RenderDrawCmd>
 	{
 	public:
 		Renderer(ovrMobile* inOvr, EGLState& inShareEglState)
@@ -271,30 +316,82 @@ namespace VaporWorldVR
 
 		void processMessage(RenderShutdownCmd const& cmd)
 		{
-			if (cmd.flushCommands)
-			{
-				// Force renderer to flush remaining messages
-				// TODO: Flush
-			}
-
 			// Set exit flag
 			requestExit = true;
 		}
 
 		FORCE_INLINE void processMessage(RenderBeginFrameCmd const& cmd)
 		{
-			VW_LOG_DEBUG_IF(cmd.frameIdx % 1000 == 0, "=== BEGIN FRAME %llu ===", (unsigned long long)cmd.frameIdx);
+			//
 		}
 
 		FORCE_INLINE void processMessage(RenderEndFrameCmd const& cmd)
 		{
-			VW_LOG_DEBUG_IF(cmd.frameIdx % 1000 == 0, "=== END FRAME %llu ===", (unsigned long long)cmd.frameIdx);
-
 			// TODO: Remove, just an experiment
+			ovrLayerProjection2 layer = vrapi_DefaultLayerProjection2();
+			layer.HeadPose = cmd.tracking.HeadPose;
+			for (int eyeIdx = 0; eyeIdx < VRAPI_FRAME_LAYER_EYE_MAX; ++eyeIdx)
+			{
+				layer.Textures[eyeIdx].ColorSwapChain = framebuffers[eyeIdx].colorTextureSwapChain;
+				layer.Textures[eyeIdx].SwapChainIndex = framebuffers[eyeIdx].textureSwapChainIdx;
+				layer.Textures[eyeIdx].TexCoordsFromTanAngles = ovrMatrix4f_TanAngleMatrixFromProjection(
+					&cmd.tracking.Eye[eyeIdx].ProjectionMatrix
+				);
+			}
+			layer.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_CHROMATIC_ABERRATION_CORRECTION;
+
+			for (int eyeIdx = 0; eyeIdx < numBuffers; ++eyeIdx)
+			{
+				Framebuffer& fb = framebuffers[eyeIdx];
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.fbos[fb.textureSwapChainIdx]);
+				GL_CHECK_ERRORS;
+
+				glEnable(GL_SCISSOR_TEST);
+				glDepthMask(GL_TRUE);
+				glEnable(GL_DEPTH_TEST);
+				glDepthFunc(GL_LEQUAL);
+				glEnable(GL_CULL_FACE);
+				glCullFace(GL_BACK);
+				GL_CHECK_ERRORS;
+
+				glViewport(0, 0, eyeTextureSize.x, eyeTextureSize.y);
+				glScissor(0, 0, eyeTextureSize.x, eyeTextureSize.y);
+				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+				GL_CHECK_ERRORS;
+
+				glBindVertexArray(vao);
+
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, viewInfoBuffer);
+				float4x4* viewInfoData = (float4x4*)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, 8 * sizeof(float4x4),
+																	GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+				GL_CHECK_ERRORS;
+				if (viewInfoData)
+				{
+					::memcpy(viewInfoData, &cmd.tracking.Eye[eyeIdx].ViewMatrix, sizeof(float4x4));
+					::memcpy(viewInfoData + 1, &cmd.tracking.Eye[eyeIdx].ProjectionMatrix, sizeof(float4x4));
+					viewInfoData[2] = viewInfoData[1].dot(viewInfoData[0]);
+					glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+				}
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+				glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, viewInfoBuffer);
+				GL_CHECK_ERRORS;
+
+				glDrawElements(GL_TRIANGLES, 6 * 6, GL_UNSIGNED_INT, NULL);
+				GL_CHECK_ERRORS;
+
+				glBindVertexArray(0);
+
+				const GLenum depthAttachment[] = {GL_DEPTH_ATTACHMENT};
+				glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 1, depthAttachment);
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+				fb.textureSwapChainIdx = (fb.textureSwapChainIdx + 1) % fb.textureSwapChainLen;
+			}
+			GL_CHECK_ERRORS;
+
 			ovrLayerProjection2 clearLayer = vrapi_DefaultLayerBlackProjection2();
 			clearLayer.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_INHIBIT_SRGB_FRAMEBUFFER;
 
-			ovrLayerHeader2 const* layers[] = {&clearLayer.Header};
+			ovrLayerHeader2 const* layers[] = {&layer.Header};
 
 			ovrSubmitFrameDescription2 frameDesc{};
 			frameDesc.Flags = cmd.frameFlags;
@@ -310,6 +407,11 @@ namespace VaporWorldVR
 		void processMessage(RenderFlushCmd const& cmd)
 		{
 			// TODO: Flush
+		}
+
+		void processMessage(RenderDrawCmd const& cmd)
+		{
+			//
 		}
 
 	protected:
@@ -379,10 +481,18 @@ namespace VaporWorldVR
 
 			// Create framebuffers
 			setupFramebuffers();
+
+			// REMOVE --------------------------
+			createProgram();
+			setupCube();
 		}
 
 		void teardown()
 		{
+			teardownCube();
+			destroyProgram();
+			// REMOVE --------------------------
+
 			// Destroy framebuffers
 			teardownFramebuffers();
 
@@ -429,6 +539,7 @@ namespace VaporWorldVR
 				fb.colorTextureSwapChain = vrapi_CreateTextureSwapChain3(eyeTextureType, colorFormat, fb.width,
 				                                                         fb.height, levels, bufferCount);
 				fb.textureSwapChainLen = vrapi_GetTextureSwapChainLength(fb.colorTextureSwapChain);
+				fb.textureSwapChainIdx = 0;
 
 				// Gen buffers and framebuffer objects
 				glGenTextures(fb.textureSwapChainLen, fb.depthBuffers);
@@ -495,11 +606,11 @@ namespace VaporWorldVR
 					// In debug, check the status of the framebuffer
 					status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
 					VW_CHECKF(status == GL_FRAMEBUFFER_COMPLETE, "Incomplete fbo (%s)",
-					           GL::getFramebufferStatusString(status));
+					          GL::getFramebufferStatusString(status));
 					if (status == 0)
 					{
 						VW_LOG_ERROR("Failed to create framebuffer object");
-						GL::flushErrors();
+						GL_CHECK_ERRORS;
 						return status;
 					}
 
@@ -522,6 +633,131 @@ namespace VaporWorldVR
 			}
 
 			VW_LOG_DEBUG("Framebuffers teardown completed");
+		}
+
+		// REMOVE ------------
+		GLuint program;
+		GLuint vao;
+		GLuint vertexBuffer;
+		GLuint indexBuffer;
+		GLuint viewInfoBuffer;
+		GLuint viewInfoBufferBinding;
+
+		void createProgram()
+		{
+			GLuint vertexShader, fragmentShader;
+			GLint status;
+
+			// Create vertex shader
+			static char const* vertexShaderSource[] = {shaderVersionString, shaderCommonTypesString,
+			                                           vertexShaderString};
+			vertexShader = glCreateShader(GL_VERTEX_SHADER);
+			glShaderSource(vertexShader, 3, vertexShaderSource, NULL);
+			glCompileShader(vertexShader);
+			glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &status);
+			if (status != GL_TRUE)
+			{
+				VW_LOG_ERROR("Failed to compile vertex shader:\n%s", GL::getShaderLog(vertexShader).c_str());
+				glDeleteShader(vertexShader);
+				return;
+			}
+			GL_CHECK_ERRORS;
+
+			// Create fragment shader
+			static char const* fragmentShaderSource[] = {shaderVersionString, fragmentShaderString};
+			fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+			glShaderSource(fragmentShader, 2, fragmentShaderSource, NULL);
+			glCompileShader(fragmentShader);
+			glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &status);
+			if (status != GL_TRUE)
+			{
+				GL_CHECK_ERRORS;
+				VW_LOG_ERROR("Failed to compile fragment shader:\n%s", GL::getShaderLog(fragmentShader).c_str());
+				glDeleteShader(fragmentShader);
+				glDeleteShader(vertexShader);
+				return;
+			}
+			GL_CHECK_ERRORS;
+
+			// Link program
+			program = glCreateProgram();
+			glAttachShader(program, vertexShader);
+			glAttachShader(program, fragmentShader);
+			glLinkProgram(program);
+			glGetProgramiv(program, GL_LINK_STATUS, &status);
+			if (status != GL_TRUE)
+			{
+				VW_LOG_ERROR("Failed to link program (%s)", GL::getErrorString());
+				glDeleteProgram(program);
+				glDeleteShader(fragmentShader);
+				glDeleteShader(vertexShader);
+				return;
+			}
+			GL_CHECK_ERRORS;
+
+			// Get view buffer location
+			glUseProgram(program);
+			GL_CHECK_ERRORS;
+
+			// Create view buffer
+			glGenBuffers(1, &viewInfoBuffer);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, viewInfoBuffer);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, 8 * sizeof(float4x4), NULL, GL_DYNAMIC_DRAW);
+
+			glUseProgram(program);
+		}
+
+		void destroyProgram()
+		{
+			glUseProgram(0);
+			glDeleteProgram(program);
+			GL_CHECK_ERRORS;
+		}
+
+		void setupCube()
+		{
+			static float3 vertexData[] = {{-1.f, -1.f, -1.f}, {1.f, -1.f, -1.f}, {-1.f, 1.f, -1.f},
+			                              {1.f, 1.f, -1.f}, {-1.f, -1.f, 1.f}, {1.f, -1.f, 1.f},
+										  {-1.f, 1.f, 1.f}, {1.f, 1.f, 1.f}};
+			static uint32_t triangleData[] = {1, 5, 6, 6, 2, 1,
+			                                  3, 2, 6, 6, 7, 3,
+											  5, 4, 7, 7, 6, 5,
+											  4, 0, 3, 3, 7, 4,
+											  4, 5, 1, 1, 0, 4,
+											  0, 1, 2, 2, 3, 0};
+
+			// Create vertex array object
+			glGenVertexArrays(1, &vao);
+			glBindVertexArray(vao);
+
+			// Generate graphics buffers
+			glGenBuffers(2, &vertexBuffer);
+
+			// Fill vertex buffer
+			glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(vertexData), vertexData, GL_STATIC_DRAW);
+			GL_CHECK_ERRORS;
+
+			// Fill index buffer
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangleData), triangleData, GL_STATIC_DRAW);
+			GL_CHECK_ERRORS;
+
+			// Setup vertex attributes
+			glVertexAttribFormat(0, 3, GL_FLOAT, GL_FALSE, 0);
+			glEnableVertexAttribArray(0);
+			GL_CHECK_ERRORS;
+
+			// Bind vertex buffer
+			glBindVertexBuffer(0, vertexBuffer, 0, sizeof(vertexData[0]));
+			glVertexAttribBinding(0, 0);
+			GL_CHECK_ERRORS;
+		}
+
+		void teardownCube()
+		{
+			glDeleteBuffers(2, &vertexBuffer);
+			glDeleteVertexArrays(1, &vao);
 		}
 	};
 
@@ -603,6 +839,7 @@ namespace VaporWorldVR
 
 				// Predict display time and HMD pose
 				displayTime = vrapi_GetPredictedDisplayTime(ovr, frameCounter);
+				tracking = vrapi_GetPredictedTracking2(ovr, displayTime);
 
 				// Begin next frame.
 				RenderBeginFrameCmd beginFrameCmd{};
@@ -610,7 +847,6 @@ namespace VaporWorldVR
 				renderer->postMessage(beginFrameCmd);
 
 				// TODO: Render scene
-				::usleep(1000);
 
 				// End current frame.
 				static constexpr uint32_t swapInterval = 1;
@@ -618,6 +854,7 @@ namespace VaporWorldVR
 				endFrameCmd.frameIdx = frameCounter;
 				endFrameCmd.displayTime = displayTime;
 				endFrameCmd.swapInterval = swapInterval;
+				endFrameCmd.tracking = tracking;
 				renderer->postMessage(endFrameCmd, MessageWait_Received);
 			}
 
@@ -682,6 +919,7 @@ namespace VaporWorldVR
 		Renderer* renderer;
 		uint64_t frameCounter;
 		double displayTime;
+		ovrTracking2 tracking;
 		bool requestExit;
 		bool resumed;
 
