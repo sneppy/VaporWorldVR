@@ -5,9 +5,6 @@
 
 #include <android/native_window_jni.h>
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
 #include "VrApi.h"
 #include "VrApi_Helpers.h"
 
@@ -80,172 +77,6 @@ namespace VaporWorldVR
 	class VertexBuffer;
 	class IndexBuffer;
 
-	struct EGLState
-	{
-		EGLint versionMajor = -1;
-		EGLint versionMinor = -1;
-		EGLDisplay display = EGL_NO_DISPLAY;
-		EGLConfig config = EGL_NO_CONFIG_KHR;
-		EGLSurface surface = EGL_NO_SURFACE;
-		EGLSurface dummySurface = EGL_NO_SURFACE;
-		EGLContext context = EGL_NO_CONTEXT;
-	};
-
-
-	static EGLBoolean initEGL(EGLState* state, EGLContext shareCtx)
-	{
-		EGLBoolean status = EGL_TRUE;
-
-		if (state->display != EGL_NO_DISPLAY)
-			// Already initialized
-			return status;
-
-		// Get the default display
-		state->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-		VW_CHECKF(state->display, "Could not find a suitable EGL display");
-
-		status = eglInitialize(state->display, &state->versionMajor, &state->versionMinor);
-		if (!status)
-		{
-			VW_LOG_ERROR("Failed to initialize EGL display (%#x)", eglGetError());
-			return EGL_FALSE;
-		}
-		VW_LOG_DEBUG("Initialized EGL display '%p' (version %d.%d)", state->display, state->versionMajor,
-		             state->versionMinor);
-
-		// We need to initialize the EGL configuration.
-		// I don't know exactly why, but we cannot use eglChooseConfig, so we
-		// list the required attributes, and enumerate all configs, and manually
-		// pick the first config that fits the requirements
-		EGLint numConfigs = 0;
-		status = eglGetConfigs(state->display, NULL, 0, &numConfigs);
-		VW_CHECKF(status, "Failed to query number of available EGL configurations (%#x)", eglGetError());
-
-		EGLConfig* configs = (EGLConfig*)malloc(numConfigs * sizeof(configs[0]));
-		status = eglGetConfigs(state->display, configs, numConfigs, &numConfigs);
-		VW_CHECKF(status, "Failed to enumerate available EGL configurations(%#x)", eglGetError());
-
-		constexpr GLint configAttrs[] = {EGL_RED_SIZE, 8,
-		                                 EGL_BLUE_SIZE, 8,
-										 EGL_GREEN_SIZE, 8,
-										 EGL_ALPHA_SIZE, 8,
-										 EGL_NONE};
-		for (EGLint configIdx = 0; configIdx < numConfigs; ++configIdx)
-		{
-			EGLConfig config = configs[configIdx];
-			EGLint flags = 0;
-
-			// Renderable type must be
-			status = eglGetConfigAttrib(state->display, config, EGL_RENDERABLE_TYPE, &flags);
-			if (!status || (flags & EGL_OPENGL_ES3_BIT_KHR) != EGL_OPENGL_ES3_BIT_KHR)
-				// Skip this configuration
-				continue;
-
-			status = eglGetConfigAttrib(state->display, config, EGL_SURFACE_TYPE, &flags);
-			if (!status || (flags & (EGL_WINDOW_BIT | EGL_PBUFFER_BIT)) != (EGL_WINDOW_BIT | EGL_PBUFFER_BIT))
-				// Skip this configuration
-				continue;
-
-			GLint attrIdx = 0;
-			for (; configAttrs[attrIdx] != EGL_NONE; attrIdx += 2)
-			{
-				GLint value = 0;
-				status = eglGetConfigAttrib(state->display, config, configAttrs[attrIdx], &value);
-				if (!status || value != configAttrs[attrIdx + 1])
-					break;
-			}
-
-			if (configAttrs[attrIdx] == EGL_NONE)
-			{
-				// This config satifsies all requirements
-				state->config = config;
-				break;
-			}
-		}
-
-		if (!state->config)
-		{
-			VW_LOG_ERROR("No suitable EGL configuration found (%#x)", eglGetError());
-			return EGL_FALSE;
-		}
-		VW_LOG_DEBUG("Picked EGL configuration");
-
-		// Create the context.
-		// We need a GLES3.x context
-		static constexpr EGLint contextAttrs[] = {EGL_CONTEXT_CLIENT_VERSION, 3,
-		                                          EGL_NONE};
-		state->context = eglCreateContext(state->display, state->config, shareCtx, contextAttrs);
-		if (!state->context)
-		{
-			VW_LOG_ERROR("Failed to create EGL context (%#x)", eglGetError());
-			// TODO: Log configuration?
-			return EGL_FALSE;
-		}
-
-		// Create dummy window to check everything works correctly
-		static constexpr EGLint dummySurfaceAttrs[] = {EGL_WIDTH, 16,
-		                                               EGL_HEIGHT, 16,
-									                   EGL_NONE};
-		state->dummySurface = eglCreatePbufferSurface(state->display, state->config, dummySurfaceAttrs);
-		if (state->dummySurface == EGL_NO_SURFACE)
-		{
-			VW_LOG_ERROR("Failed to create dummy surface (%#x); EGL initialization failed", eglGetError());
-			eglDestroyContext(state->display, state->context);
-			state->context = EGL_NO_CONTEXT;
-			return EGL_FALSE;
-		}
-
-		// Attempt to make context and dummy surface current
-		status = eglMakeCurrent(state->display, state->dummySurface, state->dummySurface, state->context);
-		if (!status)
-		{
-			VW_LOG_ERROR("Failed to make context current (%#x); EGL initialization failed", glGetError());
-			eglDestroySurface(state->display, state->dummySurface);
-			eglDestroyContext(state->display, state->context);
-			state->context = EGL_NO_CONTEXT;
-			return EGL_FALSE;
-		}
-
-		VW_LOG_DEBUG("EGL successfully initialized");
-		return status;
-	}
-
-
-	static EGLBoolean terminateEGL(EGLState* state)
-	{
-		EGLBoolean status = true;
-		if (state->display == EGL_NO_DISPLAY)
-			// Nothing to do
-			return status;
-
-		// Unbind context
-		status = eglMakeCurrent(state->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-		VW_CHECKF(status, "Failed to unbind context (%#x)", eglGetError());
-
-		if (state->dummySurface)
-		{
-			status = eglDestroySurface(state->display, state->dummySurface);
-			VW_CHECKF(status, "Failed to destroy dummy surface (%#x)", eglGetError());
-		}
-
-		if (state->context)
-		{
-			status = eglDestroyContext(state->display, state->context);
-			VW_CHECKF(status, "Failed to destroy EGL context (%#x)", eglGetError());
-		}
-
-		// Terminate EGL
-		status = eglTerminate(state->display);
-		if (!status)
-		{
-			VW_LOG_ERROR("Failed to terminate EGL (%#x)", eglGetError());
-			return status;
-		}
-
-		VW_LOG_DEBUG("EGL terminated");
-		return status;
-	}
-
 
 	struct RenderCommand : public Message
 	{
@@ -305,7 +136,7 @@ namespace VaporWorldVR
 			, shareEglState{inShareEglState}
 			, state{State_Created}
 			, numBuffers{0}
-			, useMultiView{false}
+			, multiViewSupported{false}
 			, numMultiSamples{1}
 			, eyeTextureType{VRAPI_TEXTURE_TYPE_2D}
 			, eyeTextureSize{}
@@ -426,7 +257,6 @@ namespace VaporWorldVR
 		{
 			uint32_t width;
 			uint32_t height;
-			bool useMultiView;
 			uint8_t numMultiSamples;
 			uint8_t textureSwapChainLen;
 			uint8_t textureSwapChainIdx;
@@ -441,7 +271,7 @@ namespace VaporWorldVR
 		Framebuffer framebuffers[VRAPI_FRAME_LAYER_EYE_MAX];
 		State state;
 		uint8_t numBuffers;
-		bool useMultiView;
+		bool multiViewSupported;
 		uint8_t numMultiSamples;
 		ovrTextureType eyeTextureType;
 		uint2 eyeTextureSize;
@@ -507,6 +337,20 @@ namespace VaporWorldVR
 		{
 			int status = GL_NO_ERROR;
 
+			// Load extension functions
+#define GL_GET_EXT_FUNCTION_ADDR(type, name) name = (type)eglGetProcAddress(#name);
+			GL_EXT_FUNCTIONS(GL_GET_EXT_FUNCTION_ADDR)
+#undef GL_GET_EXT_FUNCTION_ADDR
+
+#define GL_CHECK_EXT_FUNCTION(_, name) VW_CHECKF(name != nullptr, "Failed to load GL extension function '%s'", #name);
+			GL_EXT_FUNCTIONS(GL_CHECK_EXT_FUNCTION)
+#undef GL_CHECK_EXT_FUNCTION
+
+			// Query device capabilities
+			// TODO
+			multiViewSupported = false;
+			numMultiSamples = 4;
+
 			// Get suggested fbo size
 			eyeTextureSize.x = vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_SUGGESTED_EYE_TEXTURE_WIDTH);
 			eyeTextureSize.y = vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_SUGGESTED_EYE_TEXTURE_HEIGHT);
@@ -515,7 +359,7 @@ namespace VaporWorldVR
 			// Multi view means we render to a single 2D texture array, so we only need one framebuffer
 			numBuffers = VRAPI_FRAME_LAYER_EYE_MAX;
 			eyeTextureType = VRAPI_TEXTURE_TYPE_2D;
-			if (useMultiView)
+			if (multiViewSupported)
 			{
 				VW_LOG_DEBUG("Using multi-view rendering feature");
 				numBuffers = 1;
@@ -532,16 +376,25 @@ namespace VaporWorldVR
 				fb.width = eyeTextureSize.x;
 				fb.height = eyeTextureSize.y;
 				fb.numMultiSamples = numMultiSamples;
-				fb.useMultiView = useMultiView;
 				fb.colorTextureSwapChain = vrapi_CreateTextureSwapChain3(eyeTextureType, colorFormat, fb.width,
 				                                                         fb.height, levels, bufferCount);
 				fb.textureSwapChainLen = vrapi_GetTextureSwapChainLength(fb.colorTextureSwapChain);
 				fb.textureSwapChainIdx = 0;
 
 				// Gen buffers and framebuffer objects
-				glGenTextures(fb.textureSwapChainLen, fb.depthBuffers);
 				glGenFramebuffers(fb.textureSwapChainLen, fb.fbos);
 				GL_CHECK_ERRORS;
+
+				if (multiViewSupported)
+				{
+					// Multi view rendering extension requires texture arrays
+					glGenTextures(fb.textureSwapChainLen, fb.depthBuffers);
+				}
+				else
+				{
+					// For normal rendering we can use render buffers
+					glGenRenderbuffers(fb.textureSwapChainLen, fb.depthBuffers);
+				}
 
 				for (int i = 0; i < fb.textureSwapChainLen; ++i)
 				{
@@ -563,7 +416,7 @@ namespace VaporWorldVR
 					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.fbos[i]);
 					GL_CHECK_ERRORS;
 
-					if (fb.useMultiView)
+					if (multiViewSupported)
 					{
 						VW_LOG_ERROR("Multi-view rendering not implemented");
 						return -1;
@@ -585,23 +438,30 @@ namespace VaporWorldVR
 					}
 					else
 					{
-						// Create the depth texture
-						glBindTexture(GL_TEXTURE_2D, fb.depthBuffers[i]);
-						glTexStorage2D(GL_TEXTURE_2D, levels, GL_DEPTH_COMPONENT24, fb.width, fb.height);
-						glBindTexture(GL_TEXTURE_2D, 0);
-						GL_CHECK_ERRORS;
-
-						if (fb.numMultiSamples >  1)
+						if (fb.numMultiSamples > 1 && glRenderbufferStorageMultisampleEXT &&
+						    glFramebufferTexture2DMultisampleEXT)
 						{
-							VW_LOG_ERROR("MSAA rendering not implemented");
-							return -1;
+							VW_LOG_DEBUG("Using MSAAx%u", numMultiSamples);
+							glBindRenderbuffer(GL_RENDERBUFFER, fb.depthBuffers[i]);
+							glRenderbufferStorageMultisampleEXT(GL_RENDERBUFFER, numMultiSamples, GL_DEPTH_COMPONENT32F,
+							                                    fb.width, fb.height);
+							glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+							glFramebufferTexture2DMultisampleEXT(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+							                                     GL_TEXTURE_2D, colorTexture, 0, numMultiSamples);
+							glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+							                          fb.depthBuffers[i]);
 						}
 						else
 						{
+							glBindRenderbuffer(GL_RENDERBUFFER, fb.depthBuffers[i]);
+							glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32F, fb.width, fb.height);
+							glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
 							glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
 							                       colorTexture, 0);
-							glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
-							                       fb.depthBuffers[i], 0);
+							glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+							                          fb.depthBuffers[i]);
 						}
 						GL_CHECK_ERRORS;
 					}
