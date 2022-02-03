@@ -35,22 +35,26 @@ static char const shaderCommonTypesString[] =
 	"};";
 static char const vertexShaderString[] =
 	"in vec3 vertexPosition;"
+	"out vec4 vertexColor;"
 
-	"layout(std430, binding = 0) buffer ViewInfoBuffer"
+	"layout(std430, row_major, binding = 0) buffer ViewInfoBuffer"
 	"{"
 	"	ViewInfo viewInfo;"
 	"};"
 
 	"void main()"
 	"{"
-	"	gl_Position = viewInfo.worldToView * viewInfo.viewToClip * vec4(vertexPosition * 0.05f, 1.f);"
+	"	gl_Position = viewInfo.viewToClip * viewInfo.worldToView * vec4(vertexPosition + vec3(1.f, 1.f, -3.f), 1.f);"
+	"	vertexColor = vec4(vertexPosition + vec3(0.5f, 0.5f, 0.5f), 1.f);"
+	//"	gl_Position = vec4(vertexPosition * 0.25f, 1.f);"
 	"}";
 static char const fragmentShaderString[] =
+	"in lowp vec4 vertexColor;"
 	"out lowp vec4 outColor;"
 
 	"void main()"
 	"{"
-	"	outColor = vec4(1.f);"
+	"	outColor = vertexColor;"
 	"}";
 
 
@@ -260,6 +264,7 @@ namespace VaporWorldVR
 
 	struct RenderEndFrameCmd : public RenderCommand
 	{
+		ovrMobile* ovr;
 		uint64_t frameIdx;
 		uint32_t frameFlags;
 		uint32_t swapInterval;
@@ -294,9 +299,8 @@ namespace VaporWorldVR
 														   RenderFlushCmd, RenderDrawCmd>
 	{
 	public:
-		Renderer(ovrMobile* inOvr, EGLState& inShareEglState)
+		Renderer(EGLState& inShareEglState)
 			: java{}
-			, ovr{inOvr}
 			, eglState{}
 			, shareEglState{inShareEglState}
 			, state{State_Created}
@@ -346,12 +350,8 @@ namespace VaporWorldVR
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.fbos[fb.textureSwapChainIdx]);
 				GL_CHECK_ERRORS;
 
-				glEnable(GL_SCISSOR_TEST);
-				glDepthMask(GL_TRUE);
 				glEnable(GL_DEPTH_TEST);
-				glDepthFunc(GL_LEQUAL);
 				glEnable(GL_CULL_FACE);
-				glCullFace(GL_BACK);
 				GL_CHECK_ERRORS;
 
 				glViewport(0, 0, eyeTextureSize.x, eyeTextureSize.y);
@@ -359,27 +359,24 @@ namespace VaporWorldVR
 				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 				GL_CHECK_ERRORS;
 
-				glBindVertexArray(vao);
-
 				glBindBuffer(GL_SHADER_STORAGE_BUFFER, viewInfoBuffer);
 				float4x4* viewInfoData = (float4x4*)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, 8 * sizeof(float4x4),
-																	GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
-				GL_CHECK_ERRORS;
+																	 GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+				VW_CHECKF(viewInfoData != nullptr, "Failed to map buffer");
 				if (viewInfoData)
 				{
 					::memcpy(viewInfoData, &cmd.tracking.Eye[eyeIdx].ViewMatrix, sizeof(float4x4));
 					::memcpy(viewInfoData + 1, &cmd.tracking.Eye[eyeIdx].ProjectionMatrix, sizeof(float4x4));
-					viewInfoData[2] = viewInfoData[1].dot(viewInfoData[0]);
+					viewInfoData[2] = viewInfoData[0].dot(viewInfoData[1]);
 					glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 				}
-				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, viewInfoBuffer);
 				GL_CHECK_ERRORS;
 
+				glBindVertexArray(vao);
 				glDrawElements(GL_TRIANGLES, 6 * 6, GL_UNSIGNED_INT, NULL);
-				GL_CHECK_ERRORS;
-
 				glBindVertexArray(0);
+				GL_CHECK_ERRORS;
 
 				const GLenum depthAttachment[] = {GL_DEPTH_ATTACHMENT};
 				glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 1, depthAttachment);
@@ -401,7 +398,8 @@ namespace VaporWorldVR
 			frameDesc.LayerCount = 1;
 			frameDesc.Layers = layers;
 
-			vrapi_SubmitFrame2(ovr, &frameDesc);
+			VW_CHECKF(cmd.ovr != nullptr, "Missing Ovr state");
+			vrapi_SubmitFrame2(cmd.ovr, &frameDesc);
 		}
 
 		void processMessage(RenderFlushCmd const& cmd)
@@ -438,7 +436,6 @@ namespace VaporWorldVR
 		};
 
 		ovrJava java;
-		ovrMobile* ovr;
 		EGLState eglState;
 		EGLState& shareEglState;
 		Framebuffer framebuffers[VRAPI_FRAME_LAYER_EYE_MAX];
@@ -544,6 +541,7 @@ namespace VaporWorldVR
 				// Gen buffers and framebuffer objects
 				glGenTextures(fb.textureSwapChainLen, fb.depthBuffers);
 				glGenFramebuffers(fb.textureSwapChainLen, fb.fbos);
+				GL_CHECK_ERRORS;
 
 				for (int i = 0; i < fb.textureSwapChainLen; ++i)
 				{
@@ -560,8 +558,10 @@ namespace VaporWorldVR
 					glTexParameteri(textureTarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 					glTexParameteri(textureTarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 					glBindTexture(textureTarget, 0);
+					GL_CHECK_ERRORS;
 
 					glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.fbos[i]);
+					GL_CHECK_ERRORS;
 
 					if (fb.useMultiView)
 					{
@@ -572,6 +572,7 @@ namespace VaporWorldVR
 						glTexStorage3D(GL_TEXTURE_2D_ARRAY, levels, GL_DEPTH_COMPONENT, fb.width, fb.height,
 						               VRAPI_FRAME_LAYER_EYE_MAX);
 						glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+						GL_CHECK_ERRORS;
 
 						if (fb.numMultiSamples > 1)
 						{
@@ -586,8 +587,9 @@ namespace VaporWorldVR
 					{
 						// Create the depth texture
 						glBindTexture(GL_TEXTURE_2D, fb.depthBuffers[i]);
-						glTexStorage2D(GL_TEXTURE_2D, levels, GL_DEPTH_COMPONENT, fb.width, fb.height);
+						glTexStorage2D(GL_TEXTURE_2D, levels, GL_DEPTH_COMPONENT24, fb.width, fb.height);
 						glBindTexture(GL_TEXTURE_2D, 0);
+						GL_CHECK_ERRORS;
 
 						if (fb.numMultiSamples >  1)
 						{
@@ -601,6 +603,7 @@ namespace VaporWorldVR
 							glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
 							                       fb.depthBuffers[i], 0);
 						}
+						GL_CHECK_ERRORS;
 					}
 
 					// In debug, check the status of the framebuffer
@@ -610,7 +613,6 @@ namespace VaporWorldVR
 					if (status == 0)
 					{
 						VW_LOG_ERROR("Failed to create framebuffer object");
-						GL_CHECK_ERRORS;
 						return status;
 					}
 
@@ -716,9 +718,9 @@ namespace VaporWorldVR
 
 		void setupCube()
 		{
-			static float3 vertexData[] = {{-1.f, -1.f, -1.f}, {1.f, -1.f, -1.f}, {-1.f, 1.f, -1.f},
-			                              {1.f, 1.f, -1.f}, {-1.f, -1.f, 1.f}, {1.f, -1.f, 1.f},
-										  {-1.f, 1.f, 1.f}, {1.f, 1.f, 1.f}};
+			static float3 vertexData[] = {{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f},
+			                              {-0.5f, 0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f},
+										  {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}};
 			static uint32_t triangleData[] = {1, 5, 6, 6, 2, 1,
 			                                  3, 2, 6, 6, 7, 3,
 											  5, 4, 7, 7, 6, 5,
@@ -744,14 +746,16 @@ namespace VaporWorldVR
 			GL_CHECK_ERRORS;
 
 			// Setup vertex attributes
-			glVertexAttribFormat(0, 3, GL_FLOAT, GL_FALSE, 0);
 			glEnableVertexAttribArray(0);
+			glVertexAttribFormat(0, 3, GL_FLOAT, GL_FALSE, 0);
 			GL_CHECK_ERRORS;
 
 			// Bind vertex buffer
 			glBindVertexBuffer(0, vertexBuffer, 0, sizeof(vertexData[0]));
 			glVertexAttribBinding(0, 0);
 			GL_CHECK_ERRORS;
+
+			glBindVertexArray(0);
 		}
 
 		void teardownCube()
@@ -851,6 +855,7 @@ namespace VaporWorldVR
 				// End current frame.
 				static constexpr uint32_t swapInterval = 1;
 				RenderEndFrameCmd endFrameCmd{};
+				endFrameCmd.ovr = ovr;
 				endFrameCmd.frameIdx = frameCounter;
 				endFrameCmd.displayTime = displayTime;
 				endFrameCmd.swapInterval = swapInterval;
@@ -943,7 +948,7 @@ namespace VaporWorldVR
 			initEGL(&eglState, nullptr);
 
 			// Create the render thread
-			renderer = new Renderer{ovr, eglState};
+			renderer = new Renderer{eglState};
 			renderer->setJavaInfo(java.Vm, java.ActivityObject);
 
 			auto* renderThread = createRunnableThread(renderer);
