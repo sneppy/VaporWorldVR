@@ -120,6 +120,20 @@ namespace VaporWorldVR::Math
 
 
 	/**
+	 * @brief Compute the linear interpolation between two values.
+	 *
+	 * @param x The first value
+	 * @param y The second value
+	 * @param t The interpolation value
+	 * @return x + (y - x) * t
+	 */
+	constexpr FORCE_INLINE auto lerp(auto const& x, auto const& y, float t)
+	{
+		return x + (y - x) * t;
+	}
+
+
+	/**
 	 * @brief Returns a new vector where each coordinate is the least between
 	 * the coordinates of the given vectors.
 	 *
@@ -149,18 +163,5 @@ namespace VaporWorldVR::Math
 	constexpr FORCE_INLINE Vec3<decltype(T{} + U{})> vmax(Vec3<T> const& u, Vec3<U> const& v)
 	{
 		return {max(u.x, v.x), max(u.y, v.y), max(u.z, v.z)};
-	}
-
-	/**
-	 * @brief Compute the linear interpolated value.
-	 *
-	 * @param x The first value
-	 * @param y The second value
-	 * @param t The interpolation value
-	 * @return x + (y - x) * t
-	 */
-	constexpr FORCE_INLINE auto lerp(auto const& x, auto const& y, float t)
-	{
-		return x + (y - x) * t;
 	}
 } // namespace VaporWorldVR::Math
