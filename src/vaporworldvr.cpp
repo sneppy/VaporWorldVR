@@ -41,9 +41,8 @@ static char const vertexShaderString[] =
 
 	"void main()"
 	"{"
-	"	gl_Position = viewInfo.viewToClip * viewInfo.worldToView * vec4(vertexPosition + vec3(1.f, 1.f, -3.f), 1.f);"
+	"	gl_Position = viewInfo.worldToClip * vec4(vertexPosition, 1.f);"
 	"	vertexColor = vec4(vertexPosition + vec3(0.5f, 0.5f, 0.5f), 1.f);"
-	//"	gl_Position = vec4(vertexPosition * 0.25f, 1.f);"
 	"}";
 static char const fragmentShaderString[] =
 	"in lowp vec4 vertexColor;"
@@ -51,7 +50,7 @@ static char const fragmentShaderString[] =
 
 	"void main()"
 	"{"
-	"	outColor = vertexColor;"
+	"	outColor = vec4(1.f);"
 	"}";
 
 
@@ -464,8 +463,9 @@ namespace VaporWorldVR
         uint32_t vertexCount;
 		uint32_t instanceCount;
         uint32_t firstVertex;
-        uint32_t _;
+        uint32_t _0 = 0;
 
+		float3 origin;
 		uint32_t maxVertexCount;
 		uint32_t resolution;
 		float size;
@@ -474,9 +474,9 @@ namespace VaporWorldVR
 
 	struct ChunkVertexVaryingsPackedData
 	{
-		float3 normals;
+		float3 normal;
 		float4 tangent;
-		int color;
+		float occlusion;
 	};
 
 
@@ -544,6 +544,7 @@ namespace VaporWorldVR
 					"	uint instanceCount;"
 					"	uint firstVertex;"
 					"	uint _;"
+					"	vec3 origin;"
 					"	uint maxVertexCount;"
 					"	uint resolution;"
 					"	float size;"
@@ -570,7 +571,7 @@ namespace VaporWorldVR
 
 					"layout(binding = 0) writeonly buffer PositionsBuffer"
 					"{"
-					"	vec3 positions[];"
+					"	vec4 positions[];"
 					"} _350;"
 
 					"layout(binding = 1) writeonly buffer ChunkVertexVaryingsBuffer"
@@ -580,20 +581,19 @@ namespace VaporWorldVR
 
 					"float sampleDensity(vec3 pos)"
 					"{"
-					"	return 0.5f - pos.y;"
+					"	return 0.5f - length(vec3(0.f, 0.5f, -1.5f) - pos);"
 					"}"
 
 					"void main()"
 					"{"
 					"	ivec3 voxelIndex = ivec3(gl_GlobalInvocationID);"
-					"	float res = float(_34.chunkInfo.resolution);"
-					"	float _step = _34.chunkInfo.size / res;"
+					"	float _step = _34.chunkInfo.size / float(_34.chunkInfo.resolution);"
 					"	vec3 offset = vec3(voxelIndex) * _step;"
-					"	vec3 ws = offset;"
+					"	vec3 position = _34.chunkInfo.origin + offset;"
 					"	float densities[8];"
 					"	for (uint i = 0u; i < 8u; i++)"
 					"	{"
-					"		vec3 param = ws + (_83[i] * _step);"
+					"		vec3 param = position + (_83[i] * _step);"
 					"		densities[i] = sampleDensity(param);"
 					"	}"
 					"	uint marchingCase = (((((((uint(densities[0] > 0.0) << uint(0)) | (uint(densities[1] > 0.0) << uint(1))) | (uint(densities[2] > 0.0) << uint(2))) | (uint(densities[3] > 0.0) << uint(3))) | (uint(densities[4] > 0.0) << uint(4))) | (uint(densities[5] > 0.0) << uint(5))) | (uint(densities[6] > 0.0) << uint(6))) | (uint(densities[7] > 0.0) << uint(7));"
@@ -613,8 +613,8 @@ namespace VaporWorldVR
 					"		uint vertexIdx = _326;"
 					"		for (uint k = 0u; k < 3u; k++)"
 					"		{"
-					"			vec3 pos = ws + (offsets[_314.edges[j + k]] * _step);"
-					"			_350.positions[vertexIdx + k] = pos;"
+					"			vec3 offset = offsets[_314.edges[j + k]] * _step;"
+					"			_350.positions[vertexIdx + k] = vec4(position + offset, 1.f);"
 					"		}"
 					"	}"
 					"}";
@@ -628,9 +628,9 @@ namespace VaporWorldVR
 
 				// Also create edges buffer
 				glGenBuffers(1, &edgesBuffer);
-				glBindBuffer(GL_UNIFORM_BUFFER, edgesBuffer);
-				glBufferData(GL_UNIFORM_BUFFER, sizeof(edgesBuffer), edges, GL_STATIC_DRAW);
-				glBindBuffer(GL_UNIFORM_BUFFER, 0);
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, edgesBuffer);
+				glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(edges), edges, GL_STATIC_DRAW);
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 				GL_CHECK_ERRORS;
 			}
 
@@ -644,9 +644,9 @@ namespace VaporWorldVR
 	struct Scene
 	{
 		GLuint vao;
-		Chunk chunk;
 		GLuint indirectDrawArgsBuffer;
 		GLuint noiseTextures[3];
+		Chunk chunk;
 	};
 
 
@@ -662,10 +662,15 @@ namespace VaporWorldVR
 		chunk.info.vertexCount = 0;
 		chunk.info.firstVertex = 0;
 		chunk.info.instanceCount = 1;
+		chunk.info.origin = {0.f, 0.f, -2.f};
 		chunk.info.resolution = 32;
 		chunk.info.size = 1.f;
 
-		size_t vertexBufferSize = chunk.info.maxVertexCount * (sizeof(float3) + sizeof(ChunkVertexVaryingsPackedData));
+		uint64_t maxVoxelCount = chunk.info.resolution * chunk.info.resolution * chunk.info.resolution;
+		chunk.info.maxVertexCount = maxVoxelCount * VOXEL_MAX_VERTEX_COUNT;
+
+		constexpr size_t vertexDataSize = (sizeof(float3) + sizeof(ChunkVertexVaryingsPackedData));
+		size_t vertexBufferSize = chunk.info.maxVertexCount * vertexDataSize;
 		glGenBuffers(1, &chunk.vertexBuffer);
 		glBindBuffer(GL_ARRAY_BUFFER, chunk.vertexBuffer);
 		glBufferData(GL_ARRAY_BUFFER, vertexBufferSize, NULL, GL_STATIC_DRAW);
@@ -785,11 +790,12 @@ namespace VaporWorldVR
 	struct RenderCommandEndFrame : public RenderCommand
 	{
 		ovrMobile* ovr;
+		ovrTracking2 tracking;
 		uint64_t frameIdx;
 		uint32_t frameFlags;
 		uint32_t swapInterval;
 		double displayTime;
-		ovrTracking2 tracking;
+		Scene* scene;
 	};
 
 	struct RenderCommandFlush : public RenderCommand {};
@@ -798,8 +804,8 @@ namespace VaporWorldVR
 	{
 		ComputeShaderInstance* shader;
 		uint3 groups;
-		GLbitfield forceMemoryBarrier;
-		GLsync* fence;
+		GLbitfield forceMemoryBarrier = 0;
+		GLsync* fence = nullptr;
 	};
 
 
@@ -878,16 +884,52 @@ namespace VaporWorldVR
 				{
 					::memcpy(viewInfoData, &cmd.tracking.Eye[eyeIdx].ViewMatrix, sizeof(float4x4));
 					::memcpy(viewInfoData + 1, &cmd.tracking.Eye[eyeIdx].ProjectionMatrix, sizeof(float4x4));
-					viewInfoData[2] = viewInfoData[0].dot(viewInfoData[1]);
+					viewInfoData[2] = viewInfoData[1].dot(viewInfoData[0]);
 					glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 				}
 				glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, viewInfoBuffer);
 				GL_CHECK_ERRORS;
 
-				glBindVertexArray(vao);
-				glDrawElements(GL_TRIANGLES, 6 * 6, GL_UNSIGNED_INT, NULL);
-				glBindVertexArray(0);
-				GL_CHECK_ERRORS;
+				if (cmd.scene)
+				{
+					if (cmd.scene->vao == 0)
+					{
+						// Create vertex arrays
+						glGenVertexArrays(1, &cmd.scene->vao);
+						glBindVertexArray(cmd.scene->vao);
+						GL_CHECK_ERRORS;
+
+						// Define attrib formats and bindings
+						glEnableVertexAttribArray(0);
+						glVertexAttribFormat(0, 3, GL_FLOAT, GL_FALSE, 0);
+						glVertexAttribBinding(0, 0);
+						GL_CHECK_ERRORS;
+
+						glDisableVertexAttribArray(1);
+						glDisableVertexAttribArray(2);
+						glDisableVertexAttribArray(3);
+						glVertexAttribFormat(1, 3, GL_FLOAT, GL_FALSE, offsetof(ChunkVertexVaryingsPackedData, normal));
+						glVertexAttribFormat(2, 4, GL_FLOAT, GL_FALSE,
+						                     offsetof(ChunkVertexVaryingsPackedData, tangent));
+						glVertexAttribFormat(3, 1, GL_FLOAT, GL_FALSE,
+						                     offsetof(ChunkVertexVaryingsPackedData, occlusion));
+						glVertexAttribBinding(1, 1);
+						glVertexAttribBinding(2, 1);
+						glVertexAttribBinding(3, 1);
+						GL_CHECK_ERRORS;
+
+						glBindVertexArray(0);
+					}
+
+					// Draw chunk
+					glBindVertexArray(cmd.scene->vao);
+					glBindVertexBuffer(0, cmd.scene->chunk.vertexBuffer, 0, sizeof(float4));
+					glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmd.scene->indirectDrawArgsBuffer);
+					glDrawArraysIndirect(GL_TRIANGLES, (void*)cmd.scene->chunk.indirectDrawArgsOffset);
+					glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+					glBindVertexArray(0);
+					GL_CHECK_ERRORS;
+				}
 
 				const GLenum depthAttachment[] = {GL_DEPTH_ATTACHMENT};
 				glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 1, depthAttachment);
@@ -1420,6 +1462,7 @@ namespace VaporWorldVR
 				endFrameCmd.displayTime = displayTime;
 				endFrameCmd.swapInterval = swapInterval;
 				endFrameCmd.tracking = tracking;
+				endFrameCmd.scene = scene;
 				renderer->postMessage(endFrameCmd, MessageWait_Received);
 			}
 
@@ -1584,6 +1627,7 @@ namespace VaporWorldVR
 		void setupScene()
 		{
 			scene = new Scene;
+			scene->vao = 0;
 
 			// Shared buffer for indrect draw arguments
 			glGenBuffers(1, &scene->indirectDrawArgsBuffer);
@@ -1602,12 +1646,12 @@ namespace VaporWorldVR
 		{
 			if (scene->chunk.dirty)
 			{
-				// We need to regenerate chunk data
 				GLsync fence;
+
+				// We need to regenerate chunk data
 				RenderCommandDispatchCompute computeCmd;
 				computeCmd.shader = new GenerateChunkComputeShader(scene->chunk, scene->indirectDrawArgsBuffer);
 				computeCmd.groups = {4, 4, 4};
-				computeCmd.forceMemoryBarrier = GL_SHADER_STORAGE_BARRIER_BIT;
 				computeCmd.fence = &fence;
 				renderer->postMessage(computeCmd, MessageWait_Processed);
 				scene->chunk.dirty = false;
@@ -1619,7 +1663,6 @@ namespace VaporWorldVR
 				if (info)
 				{
 					VW_LOG_DEBUG("Generated %u vertices", info->vertexCount);
-					VW_LOG_DEBUG("Generated %u instances", info->resolution);
 					glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 				}
 				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
