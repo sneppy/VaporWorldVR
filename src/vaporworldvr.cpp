@@ -22,7 +22,7 @@
 #define VW_TEXTURE_SWAPCHAIN_MAX_LEN 16
 
 
-static char const shaderVersionString[] = "#version 310 es\n";
+static char const shaderVersionString[] = "#version 320 es\n";
 static char const shaderCommonTypesString[] =
 	"struct ViewInfo"
 	"{"
@@ -55,6 +55,266 @@ static char const fragmentShaderString[] =
 	"}";
 
 
+static int edges[][15] = {
+	{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 3, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 9, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 3, 8, 9, 1, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 10, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 3, 8, 1, 10, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{9, 10, 2, 0, 9, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{2, 3, 8, 2, 8, 10, 10, 8, 9, -1, -1, -1, -1, -1, -1},
+	{3, 2, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 2, 11, 8, 0, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 0, 9, 2, 11, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 2, 11, 1, 11, 9, 9, 11, 8, -1, -1, -1, -1, -1, -1},
+	{3, 1, 10, 11, 3, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 1, 10, 0, 10, 8, 8, 10, 11, -1, -1, -1, -1, -1, -1},
+	{3, 0, 9, 3, 9, 11, 11, 9, 10, -1, -1, -1, -1, -1, -1},
+	{9, 10, 8, 10, 11, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 8, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 0, 3, 7, 4, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 9, 1, 8, 7, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 9, 1, 4, 1, 7, 7, 1, 3, -1, -1, -1, -1, -1, -1},
+	{1, 10, 2, 8, 7, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{3, 7, 4, 3, 4, 0, 1, 10, 2, -1, -1, -1, -1, -1, -1},
+	{9, 10, 2, 9, 2, 0, 8, 7, 4, -1, -1, -1, -1, -1, -1},
+	{2, 9, 10, 2, 7, 9, 2, 3, 7, 7, 4, 9, -1, -1, -1},
+	{8, 7, 4, 3, 2, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{11, 7, 4, 11, 4, 2, 2, 4, 0, -1, -1, -1, -1, -1, -1},
+	{9, 1, 0, 8, 7, 4, 2, 11, 3, -1, -1, -1, -1, -1, -1},
+	{4, 11, 7, 9, 11, 4, 9, 2, 11, 9, 1, 2, -1, -1, -1},
+	{3, 1, 10, 3, 10, 11, 7, 4, 8, -1, -1, -1, -1, -1, -1},
+	{1, 10, 11, 1, 11, 4, 1, 4, 0, 7, 4, 11, -1, -1, -1},
+	{4, 8, 7, 9, 11, 0, 9, 10, 11, 11, 3, 0, -1, -1, -1},
+	{4, 11, 7, 4, 9, 11, 9, 10, 11, -1, -1, -1, -1, -1, -1},
+	{9, 4, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{9, 4, 5, 0, 3, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 4, 5, 1, 0, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{8, 4, 5, 8, 5, 3, 3, 5, 1, -1, -1, -1, -1, -1, -1},
+	{1, 10, 2, 9, 4, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{3, 8, 0, 1, 10, 2, 4, 5, 9, -1, -1, -1, -1, -1, -1},
+	{5, 10, 2, 5, 2, 4, 4, 2, 0, -1, -1, -1, -1, -1, -1},
+	{2, 5, 10, 3, 5, 2, 3, 4, 5, 3, 8, 4, -1, -1, -1},
+	{9, 4, 5, 2, 11, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 2, 11, 0, 11, 8, 4, 5, 9, -1, -1, -1, -1, -1, -1},
+	{0, 4, 5, 0, 5, 1, 2, 11, 3, -1, -1, -1, -1, -1, -1},
+	{2, 5, 1, 2, 8, 5, 2, 11, 8, 4, 5, 8, -1, -1, -1},
+	{10, 11, 3, 10, 3, 1, 9, 4, 5, -1, -1, -1, -1, -1, -1},
+	{4, 5, 9, 0, 1, 8, 8, 1, 10, 8, 10, 11, -1, -1, -1},
+	{5, 0, 4, 5, 11, 0, 5, 10, 11, 11, 3, 0, -1, -1, -1},
+	{5, 8, 4, 5, 10, 8, 10, 11, 8, -1, -1, -1, -1, -1, -1},
+	{9, 8, 7, 5, 9, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{9, 0, 3, 9, 3, 5, 5, 3, 7, -1, -1, -1, -1, -1, -1},
+	{0, 8, 7, 0, 7, 1, 1, 7, 5, -1, -1, -1, -1, -1, -1},
+	{1, 3, 5, 3, 7, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{9, 8, 7, 9, 7, 5, 10, 2, 1, -1, -1, -1, -1, -1, -1},
+	{10, 2, 1, 9, 0, 5, 5, 0, 3, 5, 3, 7, -1, -1, -1},
+	{8, 2, 0, 8, 5, 2, 8, 7, 5, 10, 2, 5, -1, -1, -1},
+	{2, 5, 10, 2, 3, 5, 3, 7, 5, -1, -1, -1, -1, -1, -1},
+	{7, 5, 9, 7, 9, 8, 3, 2, 11, -1, -1, -1, -1, -1, -1},
+	{9, 7, 5, 9, 2, 7, 9, 0, 2, 2, 11, 7, -1, -1, -1},
+	{2, 11, 3, 0, 8, 1, 1, 8, 7, 1, 7, 5, -1, -1, -1},
+	{11, 1, 2, 11, 7, 1, 7, 5, 1, -1, -1, -1, -1, -1, -1},
+	{9, 8, 5, 8, 7, 5, 10, 3, 1, 10, 11, 3, -1, -1, -1},
+	{5, 0, 7, 5, 9, 0, 7, 0, 11, 1, 10, 0, 11, 0, 10},
+	{11, 0, 10, 11, 3, 0, 10, 0, 5, 8, 7, 0, 5, 0, 7},
+	{11, 5, 10, 7, 5, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{10, 5, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 3, 8, 5, 6, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{9, 1, 0, 5, 6, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 3, 8, 1, 8, 9, 5, 6, 10, -1, -1, -1, -1, -1, -1},
+	{1, 5, 6, 2, 1, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 5, 6, 1, 6, 2, 3, 8, 0, -1, -1, -1, -1, -1, -1},
+	{9, 5, 6, 9, 6, 0, 0, 6, 2, -1, -1, -1, -1, -1, -1},
+	{5, 8, 9, 5, 2, 8, 5, 6, 2, 3, 8, 2, -1, -1, -1},
+	{2, 11, 3, 10, 5, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{11, 8, 0, 11, 0, 2, 10, 5, 6, -1, -1, -1, -1, -1, -1},
+	{0, 9, 1, 2, 11, 3, 5, 6, 10, -1, -1, -1, -1, -1, -1},
+	{5, 6, 10, 1, 2, 9, 9, 2, 11, 9, 11, 8, -1, -1, -1},
+	{6, 11, 3, 6, 3, 5, 5, 3, 1, -1, -1, -1, -1, -1, -1},
+	{0, 11, 8, 0, 5, 11, 0, 1, 5, 5, 6, 11, -1, -1, -1},
+	{3, 6, 11, 0, 6, 3, 0, 5, 6, 0, 9, 5, -1, -1, -1},
+	{6, 9, 5, 6, 11, 9, 11, 8, 9, -1, -1, -1, -1, -1, -1},
+	{5, 6, 10, 4, 8, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 0, 3, 4, 3, 7, 6, 10, 5, -1, -1, -1, -1, -1, -1},
+	{1, 0, 9, 5, 6, 10, 8, 7, 4, -1, -1, -1, -1, -1, -1},
+	{10, 5, 6, 1, 7, 9, 1, 3, 7, 7, 4, 9, -1, -1, -1},
+	{6, 2, 1, 6, 1, 5, 4, 8, 7, -1, -1, -1, -1, -1, -1},
+	{1, 5, 2, 5, 6, 2, 3, 4, 0, 3, 7, 4, -1, -1, -1},
+	{8, 7, 4, 9, 5, 0, 0, 5, 6, 0, 6, 2, -1, -1, -1},
+	{7, 9, 3, 7, 4, 9, 3, 9, 2, 5, 6, 9, 2, 9, 6},
+	{3, 2, 11, 7, 4, 8, 10, 5, 6, -1, -1, -1, -1, -1, -1},
+	{5, 6, 10, 4, 2, 7, 4, 0, 2, 2, 11, 7, -1, -1, -1},
+	{0, 9, 1, 4, 8, 7, 2, 11, 3, 5, 6, 10, -1, -1, -1},
+	{9, 1, 2, 9, 2, 11, 9, 11, 4, 7, 4, 11, 5, 6, 10},
+	{8, 7, 4, 3, 5, 11, 3, 1, 5, 5, 6, 11, -1, -1, -1},
+	{5, 11, 1, 5, 6, 11, 1, 11, 0, 7, 4, 11, 0, 11, 4},
+	{0, 9, 5, 0, 5, 6, 0, 6, 3, 11, 3, 6, 8, 7, 4},
+	{6, 9, 5, 6, 11, 9, 4, 9, 7, 7, 9, 11, -1, -1, -1},
+	{10, 9, 4, 6, 10, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 6, 10, 4, 10, 9, 0, 3, 8, -1, -1, -1, -1, -1, -1},
+	{10, 1, 0, 10, 0, 6, 6, 0, 4, -1, -1, -1, -1, -1, -1},
+	{8, 1, 3, 8, 6, 1, 8, 4, 6, 6, 10, 1, -1, -1, -1},
+	{1, 9, 4, 1, 4, 2, 2, 4, 6, -1, -1, -1, -1, -1, -1},
+	{3, 8, 0, 1, 9, 2, 2, 9, 4, 2, 4, 6, -1, -1, -1},
+	{0, 4, 2, 4, 6, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{8, 2, 3, 8, 4, 2, 4, 6, 2, -1, -1, -1, -1, -1, -1},
+	{10, 9, 4, 10, 4, 6, 11, 3, 2, -1, -1, -1, -1, -1, -1},
+	{0, 2, 8, 2, 11, 8, 4, 10, 9, 4, 6, 10, -1, -1, -1},
+	{3, 2, 11, 0, 6, 1, 0, 4, 6, 6, 10, 1, -1, -1, -1},
+	{6, 1, 4, 6, 10, 1, 4, 1, 8, 2, 11, 1, 8, 1, 11},
+	{9, 4, 6, 9, 6, 3, 9, 3, 1, 11, 3, 6, -1, -1, -1},
+	{8, 1, 11, 8, 0, 1, 11, 1, 6, 9, 4, 1, 6, 1, 4},
+	{3, 6, 11, 3, 0, 6, 0, 4, 6, -1, -1, -1, -1, -1, -1},
+	{6, 8, 4, 11, 8, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{7, 6, 10, 7, 10, 8, 8, 10, 9, -1, -1, -1, -1, -1, -1},
+	{0, 3, 7, 0, 7, 10, 0, 10, 9, 6, 10, 7, -1, -1, -1},
+	{10, 7, 6, 1, 7, 10, 1, 8, 7, 1, 0, 8, -1, -1, -1},
+	{10, 7, 6, 10, 1, 7, 1, 3, 7, -1, -1, -1, -1, -1, -1},
+	{1, 6, 2, 1, 8, 6, 1, 9, 8, 8, 7, 6, -1, -1, -1},
+	{2, 9, 6, 2, 1, 9, 6, 9, 7, 0, 3, 9, 7, 9, 3},
+	{7, 0, 8, 7, 6, 0, 6, 2, 0, -1, -1, -1, -1, -1, -1},
+	{7, 2, 3, 6, 2, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{2, 11, 3, 10, 8, 6, 10, 9, 8, 8, 7, 6, -1, -1, -1},
+	{2, 7, 0, 2, 11, 7, 0, 7, 9, 6, 10, 7, 9, 7, 10},
+	{1, 0, 8, 1, 8, 7, 1, 7, 10, 6, 10, 7, 2, 11, 3},
+	{11, 1, 2, 11, 7, 1, 10, 1, 6, 6, 1, 7, -1, -1, -1},
+	{8, 6, 9, 8, 7, 6, 9, 6, 1, 11, 3, 6, 1, 6, 3},
+	{0, 1, 9, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{7, 0, 8, 7, 6, 0, 3, 0, 11, 11, 0, 6, -1, -1, -1},
+	{7, 6, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{7, 11, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{3, 8, 0, 11, 6, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 9, 1, 11, 6, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{8, 9, 1, 8, 1, 3, 11, 6, 7, -1, -1, -1, -1, -1, -1},
+	{10, 2, 1, 6, 7, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 10, 2, 3, 8, 0, 6, 7, 11, -1, -1, -1, -1, -1, -1},
+	{2, 0, 9, 2, 9, 10, 6, 7, 11, -1, -1, -1, -1, -1, -1},
+	{6, 7, 11, 2, 3, 10, 10, 3, 8, 10, 8, 9, -1, -1, -1},
+	{7, 3, 2, 6, 7, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{7, 8, 0, 7, 0, 6, 6, 0, 2, -1, -1, -1, -1, -1, -1},
+	{2, 6, 7, 2, 7, 3, 0, 9, 1, -1, -1, -1, -1, -1, -1},
+	{1, 2, 6, 1, 6, 8, 1, 8, 9, 8, 6, 7, -1, -1, -1},
+	{10, 6, 7, 10, 7, 1, 1, 7, 3, -1, -1, -1, -1, -1, -1},
+	{10, 6, 7, 1, 10, 7, 1, 7, 8, 1, 8, 0, -1, -1, -1},
+	{0, 7, 3, 0, 10, 7, 0, 9, 10, 6, 7, 10, -1, -1, -1},
+	{7, 10, 6, 7, 8, 10, 8, 9, 10, -1, -1, -1, -1, -1, -1},
+	{6, 4, 8, 11, 6, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{3, 11, 6, 3, 6, 0, 0, 6, 4, -1, -1, -1, -1, -1, -1},
+	{8, 11, 6, 8, 6, 4, 9, 1, 0, -1, -1, -1, -1, -1, -1},
+	{9, 6, 4, 9, 3, 6, 9, 1, 3, 11, 6, 3, -1, -1, -1},
+	{6, 4, 8, 6, 8, 11, 2, 1, 10, -1, -1, -1, -1, -1, -1},
+	{1, 10, 2, 3, 11, 0, 0, 11, 6, 0, 6, 4, -1, -1, -1},
+	{4, 8, 11, 4, 11, 6, 0, 9, 2, 2, 9, 10, -1, -1, -1},
+	{10, 3, 9, 10, 2, 3, 9, 3, 4, 11, 6, 3, 4, 3, 6},
+	{8, 3, 2, 8, 2, 4, 4, 2, 6, -1, -1, -1, -1, -1, -1},
+	{0, 2, 4, 4, 2, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 0, 9, 2, 4, 3, 2, 6, 4, 4, 8, 3, -1, -1, -1},
+	{1, 4, 9, 1, 2, 4, 2, 6, 4, -1, -1, -1, -1, -1, -1},
+	{8, 3, 1, 8, 1, 6, 8, 6, 4, 6, 1, 10, -1, -1, -1},
+	{10, 0, 1, 10, 6, 0, 6, 4, 0, -1, -1, -1, -1, -1, -1},
+	{4, 3, 6, 4, 8, 3, 6, 3, 10, 0, 9, 3, 10, 3, 9},
+	{10, 4, 9, 6, 4, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 5, 9, 7, 11, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 3, 8, 4, 5, 9, 11, 6, 7, -1, -1, -1, -1, -1, -1},
+	{5, 1, 0, 5, 0, 4, 7, 11, 6, -1, -1, -1, -1, -1, -1},
+	{11, 6, 7, 8, 4, 3, 3, 4, 5, 3, 5, 1, -1, -1, -1},
+	{9, 4, 5, 10, 2, 1, 7, 11, 6, -1, -1, -1, -1, -1, -1},
+	{6, 7, 11, 1, 10, 2, 0, 3, 8, 4, 5, 9, -1, -1, -1},
+	{7, 11, 6, 5, 10, 4, 4, 10, 2, 4, 2, 0, -1, -1, -1},
+	{3, 8, 4, 3, 4, 5, 3, 5, 2, 10, 2, 5, 11, 6, 7},
+	{7, 3, 2, 7, 2, 6, 5, 9, 4, -1, -1, -1, -1, -1, -1},
+	{9, 4, 5, 0, 6, 8, 0, 2, 6, 6, 7, 8, -1, -1, -1},
+	{3, 2, 6, 3, 6, 7, 1, 0, 5, 5, 0, 4, -1, -1, -1},
+	{6, 8, 2, 6, 7, 8, 2, 8, 1, 4, 5, 8, 1, 8, 5},
+	{9, 4, 5, 10, 6, 1, 1, 6, 7, 1, 7, 3, -1, -1, -1},
+	{1, 10, 6, 1, 6, 7, 1, 7, 0, 8, 0, 7, 9, 4, 5},
+	{4, 10, 0, 4, 5, 10, 0, 10, 3, 6, 7, 10, 3, 10, 7},
+	{7, 10, 6, 7, 8, 10, 5, 10, 4, 4, 10, 8, -1, -1, -1},
+	{6, 5, 9, 6, 9, 11, 11, 9, 8, -1, -1, -1, -1, -1, -1},
+	{3, 11, 6, 0, 3, 6, 0, 6, 5, 0, 5, 9, -1, -1, -1},
+	{0, 8, 11, 0, 11, 5, 0, 5, 1, 5, 11, 6, -1, -1, -1},
+	{6, 3, 11, 6, 5, 3, 5, 1, 3, -1, -1, -1, -1, -1, -1},
+	{1, 10, 2, 9, 11, 5, 9, 8, 11, 11, 6, 5, -1, -1, -1},
+	{0, 3, 11, 0, 11, 6, 0, 6, 9, 5, 9, 6, 1, 10, 2},
+	{11, 5, 8, 11, 6, 5, 8, 5, 0, 10, 2, 5, 0, 5, 2},
+	{6, 3, 11, 6, 5, 3, 2, 3, 10, 10, 3, 5, -1, -1, -1},
+	{5, 9, 8, 5, 8, 2, 5, 2, 6, 3, 2, 8, -1, -1, -1},
+	{9, 6, 5, 9, 0, 6, 0, 2, 6, -1, -1, -1, -1, -1, -1},
+	{1, 8, 5, 1, 0, 8, 5, 8, 6, 3, 2, 8, 6, 8, 2},
+	{1, 6, 5, 2, 6, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 6, 3, 1, 10, 6, 3, 6, 8, 5, 9, 6, 8, 6, 9},
+	{10, 0, 1, 10, 6, 0, 9, 0, 5, 5, 0, 6, -1, -1, -1},
+	{0, 8, 3, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{10, 6, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{11, 10, 5, 7, 11, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{11, 10, 5, 11, 5, 7, 8, 0, 3, -1, -1, -1, -1, -1, -1},
+	{5, 7, 11, 5, 11, 10, 1, 0, 9, -1, -1, -1, -1, -1, -1},
+	{10, 5, 7, 10, 7, 11, 9, 1, 8, 8, 1, 3, -1, -1, -1},
+	{11, 2, 1, 11, 1, 7, 7, 1, 5, -1, -1, -1, -1, -1, -1},
+	{0, 3, 8, 1, 7, 2, 1, 5, 7, 7, 11, 2, -1, -1, -1},
+	{9, 5, 7, 9, 7, 2, 9, 2, 0, 2, 7, 11, -1, -1, -1},
+	{7, 2, 5, 7, 11, 2, 5, 2, 9, 3, 8, 2, 9, 2, 8},
+	{2, 10, 5, 2, 5, 3, 3, 5, 7, -1, -1, -1, -1, -1, -1},
+	{8, 0, 2, 8, 2, 5, 8, 5, 7, 10, 5, 2, -1, -1, -1},
+	{9, 1, 0, 5, 3, 10, 5, 7, 3, 3, 2, 10, -1, -1, -1},
+	{9, 2, 8, 9, 1, 2, 8, 2, 7, 10, 5, 2, 7, 2, 5},
+	{1, 5, 3, 3, 5, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 7, 8, 0, 1, 7, 1, 5, 7, -1, -1, -1, -1, -1, -1},
+	{9, 3, 0, 9, 5, 3, 5, 7, 3, -1, -1, -1, -1, -1, -1},
+	{9, 7, 8, 5, 7, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{5, 4, 8, 5, 8, 10, 10, 8, 11, -1, -1, -1, -1, -1, -1},
+	{5, 4, 0, 5, 0, 11, 5, 11, 10, 11, 0, 3, -1, -1, -1},
+	{0, 9, 1, 8, 10, 4, 8, 11, 10, 10, 5, 4, -1, -1, -1},
+	{10, 4, 11, 10, 5, 4, 11, 4, 3, 9, 1, 4, 3, 4, 1},
+	{2, 1, 5, 2, 5, 8, 2, 8, 11, 4, 8, 5, -1, -1, -1},
+	{0, 11, 4, 0, 3, 11, 4, 11, 5, 2, 1, 11, 5, 11, 1},
+	{0, 5, 2, 0, 9, 5, 2, 5, 11, 4, 8, 5, 11, 5, 8},
+	{9, 5, 4, 2, 3, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{2, 10, 5, 3, 2, 5, 3, 5, 4, 3, 4, 8, -1, -1, -1},
+	{5, 2, 10, 5, 4, 2, 4, 0, 2, -1, -1, -1, -1, -1, -1},
+	{3, 2, 10, 3, 10, 5, 3, 5, 8, 4, 8, 5, 0, 9, 1},
+	{5, 2, 10, 5, 4, 2, 1, 2, 9, 9, 2, 4, -1, -1, -1},
+	{8, 5, 4, 8, 3, 5, 3, 1, 5, -1, -1, -1, -1, -1, -1},
+	{0, 5, 4, 1, 5, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{8, 5, 4, 8, 3, 5, 9, 5, 0, 0, 5, 3, -1, -1, -1},
+	{9, 5, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 7, 11, 4, 11, 9, 9, 11, 10, -1, -1, -1, -1, -1, -1},
+	{0, 3, 8, 4, 7, 9, 9, 7, 11, 9, 11, 10, -1, -1, -1},
+	{1, 11, 10, 1, 4, 11, 1, 0, 4, 7, 11, 4, -1, -1, -1},
+	{3, 4, 1, 3, 8, 4, 1, 4, 10, 7, 11, 4, 10, 4, 11},
+	{4, 7, 11, 9, 4, 11, 9, 11, 2, 9, 2, 1, -1, -1, -1},
+	{9, 4, 7, 9, 7, 11, 9, 11, 1, 2, 1, 11, 0, 3, 8},
+	{11, 4, 7, 11, 2, 4, 2, 0, 4, -1, -1, -1, -1, -1, -1},
+	{11, 4, 7, 11, 2, 4, 8, 4, 3, 3, 4, 2, -1, -1, -1},
+	{2, 10, 9, 2, 9, 7, 2, 7, 3, 7, 9, 4, -1, -1, -1},
+	{9, 7, 10, 9, 4, 7, 10, 7, 2, 8, 0, 7, 2, 7, 0},
+	{3, 10, 7, 3, 2, 10, 7, 10, 4, 1, 0, 10, 4, 10, 0},
+	{1, 2, 10, 8, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 1, 9, 4, 7, 1, 7, 3, 1, -1, -1, -1, -1, -1, -1},
+	{4, 1, 9, 4, 7, 1, 0, 1, 8, 8, 1, 7, -1, -1, -1},
+	{4, 3, 0, 7, 3, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{4, 7, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{9, 8, 10, 10, 8, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{3, 9, 0, 3, 11, 9, 11, 10, 9, -1, -1, -1, -1, -1, -1},
+	{0, 10, 1, 0, 8, 10, 8, 11, 10, -1, -1, -1, -1, -1, -1},
+	{3, 10, 1, 11, 10, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 11, 2, 1, 9, 11, 9, 8, 11, -1, -1, -1, -1, -1, -1},
+	{3, 9, 0, 3, 11, 9, 1, 9, 2, 2, 9, 11, -1, -1, -1},
+	{0, 11, 2, 8, 11, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{3, 11, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{2, 8, 3, 2, 10, 8, 10, 9, 8, -1, -1, -1, -1, -1, -1},
+	{9, 2, 10, 0, 2, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{2, 8, 3, 2, 10, 8, 0, 8, 1, 1, 8, 10, -1, -1, -1},
+	{1, 2, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{1, 8, 3, 9, 8, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+	{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
+};
+
+
 namespace VaporWorldVR
 {
 	static FORCE_INLINE void logMatrix(float4x4 const& m)
@@ -73,27 +333,456 @@ namespace VaporWorldVR
 	class Renderer;
 	class Scene;
 
-	class GPUBuffer;
-	class VertexBuffer;
-	class IndexBuffer;
 
-
-	struct RenderCommand : public Message
+	struct ShaderInitializer
 	{
+		enum Type
+		{
+			Type_None,
+			Type_Source,
+			Type_Binary
+		};
 
+		Type type;
+		::std::vector<GLchar> sourceOrBinary;
+
+		void operator()(GLuint shader) const
+		{
+			switch (type)
+			{
+			case Type_Source:
+			{
+				GLchar const* const source[] = {sourceOrBinary.data()};
+				GLint const sourceLen[] = {(GLint)sourceOrBinary.size()};
+				glShaderSource(shader, 1, source, sourceLen);
+			}
+			break;
+
+			case Type_Binary:
+			{
+				VW_ASSERTF(false, "Binary shader source not implemented");
+			}
+			break;
+
+			default:
+				VW_LOG_ERROR("Invalid initializer type '%d'", type);
+				break;
+			}
+		}
 	};
 
-	struct RenderShutdownCmd : public Message
+
+	class ComputeShader
+	{
+		friend class ComputeShaderInstance;
+
+	public:
+		ComputeShader([[maybe_unused]]::std::string const& inName)
+			: name{inName}
+		{}
+
+		void init(ShaderInitializer const& initializer)
+		{
+			GLint status = GL_FALSE;
+
+			// Create and compile the shader
+			GLuint shader = glCreateShader(GL_COMPUTE_SHADER);
+			initializer(shader);
+			glCompileShader(shader);
+			glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+			if (status != GL_TRUE)
+			{
+				VW_LOG_ERROR("Failed to compile compute shader '%s':\n%s", name.c_str(),
+							 GL::getShaderLog(shader).c_str());
+				glDeleteShader(shader);
+				return;
+			}
+
+			program = glCreateProgram();
+			glAttachShader(program, shader);
+			glLinkProgram(program);
+			glGetProgramiv(program, GL_LINK_STATUS, &status);
+			GL_CHECK_ERRORS;
+			if (status != GL_TRUE)
+			{
+				VW_LOG_ERROR("Failed to link compute program '%s'", name.c_str());
+				glDeleteShader(shader);
+				glDeleteProgram(program);
+				return;
+			}
+
+			VW_LOG_DEBUG("Compute shader '%s' correctly initialized", name.c_str());
+		}
+
+		void release()
+		{
+			glDeleteProgram(program);
+		}
+
+	protected:
+		GLuint program;
+		::std::string name;
+	};
+
+
+	class ComputeShaderInstance
+	{
+	public:
+		FORCE_INLINE char const* getName() const
+		{
+			return getComputeShader()->name.c_str();
+		}
+
+		virtual void bind() const
+		{
+			ComputeShader* computeShader = getComputeShader();
+			glUseProgram(computeShader->program);
+		}
+
+		virtual void unbind() const
+		{
+			glUseProgram(0);
+		}
+
+		void dispatch(uint3 groups)
+		{
+			glDispatchCompute(groups.x, groups.y, groups.z);
+			GL_CHECK_ERRORS;
+		}
+
+	protected:
+		virtual ComputeShader* getComputeShader() const = 0;
+	};
+
+
+#define VOXEL_MAX_VERTEX_COUNT 15
+#define MAX_CHUNKS 255
+
+
+	struct ChunkInfo
+	{
+        uint32_t vertexCount;
+		uint32_t instanceCount;
+        uint32_t firstVertex;
+        uint32_t _;
+
+		uint32_t maxVertexCount;
+		uint32_t resolution;
+		float size;
+	};
+
+
+	struct ChunkVertexVaryingsPackedData
+	{
+		float3 normals;
+		float4 tangent;
+		int color;
+	};
+
+
+	struct Chunk
+	{
+		ChunkInfo info;
+		GLuint vertexBuffer;
+		size_t indirectDrawArgsOffset;
+		bool dirty;
+	};
+
+
+	class GenerateChunkComputeShader : public ComputeShaderInstance
+	{
+	public:
+		GenerateChunkComputeShader(Chunk const& inChunk, GLuint inChunkInfoBuffer)
+			: chunk{inChunk}
+			, chunkInfoBuffer{inChunkInfoBuffer}
+		{}
+
+		virtual void bind() const override
+		{
+			ComputeShaderInstance::bind();
+
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkInfoBuffer);
+			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunk.indirectDrawArgsOffset, sizeof(ChunkInfo), &chunk.info);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+			GL_CHECK_ERRORS;
+
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, chunk.vertexBuffer);
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, chunkInfoBuffer, chunk.indirectDrawArgsOffset,
+			                  sizeof(ChunkInfo));
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, edgesBuffer);
+			GL_CHECK_ERRORS;
+		}
+
+		virtual void unbind() const override
+		{
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, 0);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+
+			ComputeShaderInstance::unbind();
+		}
+
+	private:
+		static GLuint edgesBuffer;
+		Chunk const& chunk;
+		GLuint chunkInfoBuffer;
+
+		virtual ComputeShader* getComputeShader() const override
+		{
+			static ComputeShader* computeShader = nullptr;
+			if (!computeShader)
+			{
+				static GLchar const shaderSource[] =
+					"#version 320 es\n"
+					"layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;"
+					"layout(std430) buffer;"
+
+					"struct ChunkInfo"
+					"{"
+					"	uint vertexCount;"
+					"	uint instanceCount;"
+					"	uint firstVertex;"
+					"	uint _;"
+					"	uint maxVertexCount;"
+					"	uint resolution;"
+					"	float size;"
+					"};"
+
+					"const vec3 _83[8] = vec3[](vec3(0.0), vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), vec3(1.0), vec3(1.0, 0.0, 1.0));"
+
+					"struct ChunkVertexVaryings"
+					"{"
+					"	vec3 normal;"
+					"	vec4 tangent;"
+					"	float occlusion;"
+					"};"
+
+					"layout(binding = 3) readonly buffer EdgesBuffer"
+					"{"
+					"	int edges[3840];"
+					"} _314;"
+
+					"layout(binding = 2) buffer ChunkInfoBuffer"
+					"{"
+					"	ChunkInfo chunkInfo;"
+					"} _34;"
+
+					"layout(binding = 0) writeonly buffer PositionsBuffer"
+					"{"
+					"	vec3 positions[];"
+					"} _350;"
+
+					"layout(binding = 1) writeonly buffer ChunkVertexVaryingsBuffer"
+					"{"
+					"	ChunkVertexVaryings varyings[];"
+					"} _366;"
+
+					"float sampleDensity(vec3 pos)"
+					"{"
+					"	return 0.5f - pos.y;"
+					"}"
+
+					"void main()"
+					"{"
+					"	ivec3 voxelIndex = ivec3(gl_GlobalInvocationID);"
+					"	float res = float(_34.chunkInfo.resolution);"
+					"	float _step = _34.chunkInfo.size / res;"
+					"	vec3 offset = vec3(voxelIndex) * _step;"
+					"	vec3 ws = offset;"
+					"	float densities[8];"
+					"	for (uint i = 0u; i < 8u; i++)"
+					"	{"
+					"		vec3 param = ws + (_83[i] * _step);"
+					"		densities[i] = sampleDensity(param);"
+					"	}"
+					"	uint marchingCase = (((((((uint(densities[0] > 0.0) << uint(0)) | (uint(densities[1] > 0.0) << uint(1))) | (uint(densities[2] > 0.0) << uint(2))) | (uint(densities[3] > 0.0) << uint(3))) | (uint(densities[4] > 0.0) << uint(4))) | (uint(densities[5] > 0.0) << uint(5))) | (uint(densities[6] > 0.0) << uint(6))) | (uint(densities[7] > 0.0) << uint(7));"
+					"	if ((marchingCase == 0u) || (marchingCase == 255u))"
+					"	{"
+					"		return;"
+					"	}"
+					"	vec3 offsets[12] = vec3[](mix(vec3(0.0), vec3(0.0, 1.0, 0.0), vec3((-densities[0]) / (densities[1] - densities[0]))), mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), vec3((-densities[1]) / (densities[2] - densities[1]))), mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3((-densities[2]) / (densities[3] - densities[2]))), mix(vec3(1.0, 0.0, 0.0), vec3(0.0), vec3((-densities[3]) / (densities[0] - densities[3]))), mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), vec3((-densities[4]) / (densities[5] - densities[4]))), mix(vec3(0.0, 1.0, 1.0), vec3(1.0), vec3((-densities[5]) / (densities[6] - densities[5]))), mix(vec3(1.0), vec3(1.0, 0.0, 1.0), vec3((-densities[6]) / (densities[7] - densities[6]))), mix(vec3(1.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0), vec3((-densities[7]) / (densities[4] - densities[7]))), mix(vec3(0.0), vec3(0.0, 0.0, 1.0), vec3((-densities[0]) / (densities[4] - densities[0]))), mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 1.0), vec3((-densities[1]) / (densities[5] - densities[1]))), mix(vec3(1.0, 1.0, 0.0), vec3(1.0), vec3((-densities[2]) / (densities[6] - densities[2]))), mix(vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 1.0), vec3((-densities[3]) / (densities[7] - densities[3]))));"
+					"	for (uint i_1 = 0u; i_1 < 15u; i_1 += 3u)"
+					"	{"
+					"		uint j = (marchingCase * 15u) + i_1;"
+					"		if (_314.edges[j] == -1)"
+					"		{"
+					"			break;"
+					"		}"
+					"		uint _326 = atomicAdd(_34.chunkInfo.vertexCount, 3u);"
+					"		uint vertexIdx = _326;"
+					"		for (uint k = 0u; k < 3u; k++)"
+					"		{"
+					"			vec3 pos = ws + (offsets[_314.edges[j + k]] * _step);"
+					"			_350.positions[vertexIdx + k] = pos;"
+					"		}"
+					"	}"
+					"}";
+
+				ShaderInitializer initializer;
+				initializer.type = ShaderInitializer::Type_Source;
+				initializer.sourceOrBinary = {shaderSource, shaderSource + sizeof(shaderSource)};
+
+				computeShader = new ComputeShader("GenerateChunkComputeShader");
+				computeShader->init(initializer);
+
+				// Also create edges buffer
+				glGenBuffers(1, &edgesBuffer);
+				glBindBuffer(GL_UNIFORM_BUFFER, edgesBuffer);
+				glBufferData(GL_UNIFORM_BUFFER, sizeof(edgesBuffer), edges, GL_STATIC_DRAW);
+				glBindBuffer(GL_UNIFORM_BUFFER, 0);
+				GL_CHECK_ERRORS;
+			}
+
+			return computeShader;
+		}
+	};
+
+	GLuint GenerateChunkComputeShader::edgesBuffer = 0;
+
+
+	struct Scene
+	{
+		GLuint vao;
+		Chunk chunk;
+		GLuint indirectDrawArgsBuffer;
+		GLuint noiseTextures[3];
+	};
+
+
+	struct PerlinNoise
+	{
+		float3 grads[512];
+		uint32_t perms[512];
+	};
+
+
+	static void initChunk(Chunk& chunk, uint32_t idx)
+	{
+		chunk.info.vertexCount = 0;
+		chunk.info.firstVertex = 0;
+		chunk.info.instanceCount = 1;
+		chunk.info.resolution = 32;
+		chunk.info.size = 1.f;
+
+		size_t vertexBufferSize = chunk.info.maxVertexCount * (sizeof(float3) + sizeof(ChunkVertexVaryingsPackedData));
+		glGenBuffers(1, &chunk.vertexBuffer);
+		glBindBuffer(GL_ARRAY_BUFFER, chunk.vertexBuffer);
+		glBufferData(GL_ARRAY_BUFFER, vertexBufferSize, NULL, GL_STATIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		chunk.indirectDrawArgsOffset = idx * sizeof(ChunkInfo);
+		chunk.dirty = true;
+	}
+
+
+	static void initPerlinNoiseGenerator(PerlinNoise& noiseGen)
+	{
+		for (uint32_t i = 0; i < 256; ++i)
+		{
+			noiseGen.perms[i] = i;
+		}
+
+		for (uint32_t i = 0; i < 256; ++i)
+		{
+			uint32_t j = rand() & 0xff;
+			::std::swap(noiseGen.perms[i], noiseGen.perms[j]);
+		}
+
+		for (uint32_t i = 0; i < 256; ++i)
+		{
+			constexpr float deltaAngle = (M_PI * 2.f) / 256;
+			noiseGen.grads[i] = {Math::cos(noiseGen.perms[i] * deltaAngle),
+			                     Math::cos(noiseGen.perms[noiseGen.perms[i]] * deltaAngle),
+								 Math::sin(noiseGen.perms[i] * deltaAngle)};
+		}
+	}
+
+
+	static float perlinNoiseSample3D(PerlinNoise const& noise, float3 pos, uint3 period)
+	{
+		return 0.f;
+	}
+
+
+	static float perlinNoiseSampleOctaves3D(PerlinNoise const& noise, float3 pos, uint3 period, uint32_t numOctaves)
+	{
+		float value = 0.f;
+		float freq = 1.f;
+		float ampl = 0.5f;
+
+		for (uint32_t octave; octave < numOctaves; octave++)
+		{
+			value += perlinNoiseSample3D(noise, pos * freq, period) * ampl;
+			freq *= 2.f;
+			ampl *= 0.5f;
+		}
+
+		return value;
+	}
+
+
+	static void initNoiseTextures(GLuint textures[], uint32_t numTextures, uint3 const& textureRes)
+	{
+		// The size of the texture buffer in Bytes
+		size_t const textureBufferSize = textureRes.x * textureRes.y * textureRes.z * sizeof(float);
+		float3 const textureDensity{textureRes};
+
+		// Generate GL textures
+		glGenTextures(numTextures, textures);
+
+		// Buffer used to store texture temporary data
+		float* textureBuffer = (float*)::malloc(textureBufferSize);
+
+		for (uint32_t idx = 0; idx < numTextures; ++idx)
+		{
+			VW_LOG_DEBUG("Generating noise texture #%u", idx);
+
+			// Noise generator
+			PerlinNoise noiseGen;
+			initPerlinNoiseGenerator(noiseGen);
+
+			for (uint32_t i = 0; i < textureRes.x; ++i)
+			{
+				for (uint32_t j = 0; j < textureRes.y; ++j)
+				{
+					for (uint32_t k = 0; k < textureRes.z; ++k)
+					{
+						size_t const pixelIdx = ((i * textureRes.y) + j) * textureRes.z + k;
+						float3 pos{i / textureDensity.x, j / textureDensity.y, k / textureDensity.z};
+						textureBuffer[pixelIdx] = perlinNoiseSampleOctaves3D(noiseGen, pos, textureRes, 5);
+					}
+				}
+			}
+
+			glBindTexture(GL_TEXTURE_3D, textures[idx]);
+			glTexStorage3D(GL_TEXTURE_3D, 1, GL_R32F, textureRes.x, textureRes.y, textureRes.z);
+			glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, textureRes.x, textureRes.y, textureRes.z, GL_RED, GL_FLOAT,
+			                textureBuffer);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glBindTexture(GL_TEXTURE_3D, 0);
+		}
+
+		::free(textureBuffer);
+	}
+
+
+	struct RenderCommand : public Message {};
+
+	struct RenderCommandShutdown : public RenderCommand
 	{
 		//
 	};
 
-	struct RenderBeginFrameCmd : public RenderCommand
+	struct RenderCommandBeginFrame : public RenderCommand
 	{
 		uint64_t frameIdx;
 	};
 
-	struct RenderEndFrameCmd : public RenderCommand
+	struct RenderCommandEndFrame : public RenderCommand
 	{
 		ovrMobile* ovr;
 		uint64_t frameIdx;
@@ -103,31 +792,20 @@ namespace VaporWorldVR
 		ovrTracking2 tracking;
 	};
 
-	struct RenderFlushCmd : public RenderCommand {};
+	struct RenderCommandFlush : public RenderCommand {};
 
-	struct RenderDrawCmd : public RenderCommand
+	struct RenderCommandDispatchCompute : public RenderCommand
 	{
-		GLenum primitiveType;
-		GLuint vertexBuffer;
-		GLuint indexBuffer;
-		size_t numElements;
-		size_t drawOffset;
-		// Ignored
-		uint32_t numInstances;
-	};
-
-	struct RenderDrawIndirectCmd : public RenderCommand
-	{
-		VertexBuffer* vertexBuffer;
-		IndexBuffer* indexBuffer;
-		GPUBuffer* drawArgsBuffer;
-		size_t argsOffset;
+		ComputeShaderInstance* shader;
+		uint3 groups;
+		GLbitfield forceMemoryBarrier;
+		GLsync* fence;
 	};
 
 
 	class Renderer : public Runnable, public MessageTarget<Renderer,
-	                                                       RenderShutdownCmd, RenderBeginFrameCmd, RenderEndFrameCmd,
-														   RenderFlushCmd, RenderDrawCmd>
+	                                                       RenderCommandShutdown, RenderCommandBeginFrame, RenderCommandEndFrame,
+														   RenderCommandFlush, RenderCommandDispatchCompute>
 	{
 	public:
 		Renderer(EGLState& inShareEglState)
@@ -149,18 +827,18 @@ namespace VaporWorldVR
 			java.ActivityObject = activity;
 		}
 
-		void processMessage(RenderShutdownCmd const& cmd)
+		void processMessage(RenderCommandShutdown const& cmd)
 		{
 			// Set exit flag
 			requestExit = true;
 		}
 
-		FORCE_INLINE void processMessage(RenderBeginFrameCmd const& cmd)
+		FORCE_INLINE void processMessage(RenderCommandBeginFrame const& cmd)
 		{
 			//
 		}
 
-		FORCE_INLINE void processMessage(RenderEndFrameCmd const& cmd)
+		void processMessage(RenderCommandEndFrame const& cmd)
 		{
 			// TODO: Remove, just an experiment
 			ovrLayerProjection2 layer = vrapi_DefaultLayerProjection2();
@@ -177,6 +855,8 @@ namespace VaporWorldVR
 
 			for (int eyeIdx = 0; eyeIdx < numBuffers; ++eyeIdx)
 			{
+				glUseProgram(program);
+
 				Framebuffer& fb = framebuffers[eyeIdx];
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.fbos[fb.textureSwapChainIdx]);
 				GL_CHECK_ERRORS;
@@ -213,6 +893,8 @@ namespace VaporWorldVR
 				glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 1, depthAttachment);
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 				fb.textureSwapChainIdx = (fb.textureSwapChainIdx + 1) % fb.textureSwapChainLen;
+
+				glUseProgram(0);
 			}
 			GL_CHECK_ERRORS;
 
@@ -233,14 +915,31 @@ namespace VaporWorldVR
 			vrapi_SubmitFrame2(cmd.ovr, &frameDesc);
 		}
 
-		void processMessage(RenderFlushCmd const& cmd)
+		void processMessage(RenderCommandFlush const& cmd)
 		{
 			// TODO: Flush
 		}
 
-		void processMessage(RenderDrawCmd const& cmd)
+		void processMessage(RenderCommandDispatchCompute const& cmd)
 		{
-			//
+			VW_LOG_DEBUG("Dispatch compute shader '%s'", cmd.shader->getName());
+			cmd.shader->bind();
+			cmd.shader->dispatch(cmd.groups);
+			cmd.shader->unbind();
+
+			if (cmd.forceMemoryBarrier != GL_NONE)
+			{
+				// Sync memory after compute
+				glMemoryBarrier(cmd.forceMemoryBarrier);
+				GL_CHECK_ERRORS;
+			}
+
+			if (cmd.fence)
+			{
+				// Create fence to wait for compute shader to end
+				*(cmd.fence) = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+			}
+			VW_LOG_DEBUG("Dispatch done");
 		}
 
 	protected:
@@ -580,13 +1279,13 @@ namespace VaporWorldVR
 		{
 			static float3 vertexData[] = {{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f},
 			                              {-0.5f, 0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f},
-										  {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}};
+			                              {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}};
 			static uint32_t triangleData[] = {1, 5, 6, 6, 2, 1,
 			                                  3, 2, 6, 6, 7, 3,
-											  5, 4, 7, 7, 6, 5,
-											  4, 0, 3, 3, 7, 4,
-											  4, 5, 1, 1, 0, 4,
-											  0, 1, 2, 2, 3, 0};
+			                                  5, 4, 7, 7, 6, 5,
+			                                  4, 0, 3, 3, 7, 4,
+			                                  4, 5, 1, 1, 0, 4,
+			                                  0, 1, 2, 2, 3, 0};
 
 			// Create vertex array object
 			glGenVertexArrays(1, &vao);
@@ -706,15 +1405,16 @@ namespace VaporWorldVR
 				tracking = vrapi_GetPredictedTracking2(ovr, displayTime);
 
 				// Begin next frame.
-				RenderBeginFrameCmd beginFrameCmd{};
+				RenderCommandBeginFrame beginFrameCmd{};
 				beginFrameCmd.frameIdx = frameCounter;
 				renderer->postMessage(beginFrameCmd);
 
 				// TODO: Render scene
+				updateScene();
 
 				// End current frame.
 				static constexpr uint32_t swapInterval = 1;
-				RenderEndFrameCmd endFrameCmd{};
+				RenderCommandEndFrame endFrameCmd{};
 				endFrameCmd.ovr = ovr;
 				endFrameCmd.frameIdx = frameCounter;
 				endFrameCmd.displayTime = displayTime;
@@ -816,12 +1516,18 @@ namespace VaporWorldVR
 			renderThread->start();
 
 			VW_LOG_DEBUG("Application setup completed");
+
+			// Delete >>>>>>>>>>>>>>>>>>>>>>>
+			setupScene();
 		}
 
 		void teardown()
 		{
+			teardownScene();
+			// Delete <<<<<<<<<<<<<<<<<<<<<<
+
 			// Stop the render thread
-			renderer->postMessage<RenderShutdownCmd>({}, MessageWait_Processed);
+			renderer->postMessage<RenderCommandShutdown>({}, MessageWait_Processed);
 			auto* renderThread = renderer->getThread();
 			renderThread->join();
 			destroyRunnableThread(renderThread);
@@ -870,6 +1576,59 @@ namespace VaporWorldVR
 				vrapi_LeaveVrMode(ovr);
 				ovr = nullptr;
 			}
+		}
+
+		// REMOVE ---------------------------------
+		Scene* scene;
+
+		void setupScene()
+		{
+			scene = new Scene;
+
+			// Shared buffer for indrect draw arguments
+			glGenBuffers(1, &scene->indirectDrawArgsBuffer);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, scene->indirectDrawArgsBuffer);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_CHUNKS * sizeof(ChunkInfo), NULL, GL_DYNAMIC_COPY);
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+			// Create and upload noise textures
+			initNoiseTextures(scene->noiseTextures, 1, 64);
+
+			// Initialize first chunk
+			initChunk(scene->chunk, 0);
+		}
+
+		void updateScene()
+		{
+			if (scene->chunk.dirty)
+			{
+				// We need to regenerate chunk data
+				GLsync fence;
+				RenderCommandDispatchCompute computeCmd;
+				computeCmd.shader = new GenerateChunkComputeShader(scene->chunk, scene->indirectDrawArgsBuffer);
+				computeCmd.groups = {4, 4, 4};
+				computeCmd.forceMemoryBarrier = GL_SHADER_STORAGE_BARRIER_BIT;
+				computeCmd.fence = &fence;
+				renderer->postMessage(computeCmd, MessageWait_Processed);
+				scene->chunk.dirty = false;
+
+				// Wait for compute shader to terminate execution
+				glWaitSync(fence, 0, 0);
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, scene->indirectDrawArgsBuffer);
+				ChunkInfo* info = (ChunkInfo*)glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(ChunkInfo), GL_MAP_READ_BIT);
+				if (info)
+				{
+					VW_LOG_DEBUG("Generated %u vertices", info->vertexCount);
+					VW_LOG_DEBUG("Generated %u instances", info->resolution);
+					glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+				}
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+			}
+		}
+
+		void teardownScene()
+		{
+			//
 		}
 	};
 } // namespace VaporWorldVR
