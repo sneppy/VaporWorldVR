@@ -4,7 +4,6 @@
 #include <variant>
 
 #include <android/native_window_jni.h>
-
 #include "VrApi.h"
 #include "VrApi_Helpers.h"
 
@@ -15,9 +14,7 @@
 #include "mutex.h"
 #include "math/math.h"
 #include "message.h"
-
-
-#define FORWARD(x) ::std::forward<decltype((x))>((x))
+#include "utility.h"
 
 #define VW_TEXTURE_SWAPCHAIN_MAX_LEN 16
 
@@ -31,7 +28,10 @@ static char const shaderCommonTypesString[] =
 	"	mat4 worldToClip;"
 	"};";
 static char const vertexShaderString[] =
-	"in vec3 vertexPosition;"
+	"layout(location = 0) in vec3 vertexPosition;"
+	"layout(location = 1) in vec3 vertexNormal;"
+	"layout(location = 2) in vec4 vertexTangent;"
+	"layout(location = 3) in float vertexOcclusion;"
 	"out vec4 vertexColor;"
 
 	"layout(std430, row_major, binding = 0) buffer ViewInfoBuffer"
@@ -42,7 +42,7 @@ static char const vertexShaderString[] =
 	"void main()"
 	"{"
 	"	gl_Position = viewInfo.worldToClip * vec4(vertexPosition, 1.f);"
-	"	vertexColor = vec4(vertexPosition + vec3(0.5f, 0.5f, 0.5f), 1.f);"
+	"	vertexColor = vec4(vec3(vertexOcclusion), 1.f);"
 	"}";
 static char const fragmentShaderString[] =
 	"in lowp vec4 vertexColor;"
@@ -50,7 +50,7 @@ static char const fragmentShaderString[] =
 
 	"void main()"
 	"{"
-	"	outColor = vec4(1.f);"
+	"	outColor = vertexColor;"
 	"}";
 
 
@@ -455,6 +455,7 @@ namespace VaporWorldVR
 
 
 #define VOXEL_MAX_VERTEX_COUNT 15
+#define CHUNK_MAX_VERTEX_BUFFER_SIZE 0x400000ull // 4 MB
 #define MAX_CHUNKS 255
 
 
@@ -472,11 +473,18 @@ namespace VaporWorldVR
 	};
 
 
-	struct ChunkVertexVaryingsPackedData
+	struct ChunkVertexPositionOnly
+	{
+		float3 position;
+		float _0;
+	};
+
+
+	struct ChunkVertexVaryings
 	{
 		float3 normal;
-		float4 tangent;
 		float occlusion;
+		float4 tangent;
 	};
 
 
@@ -492,25 +500,44 @@ namespace VaporWorldVR
 	class GenerateChunkComputeShader : public ComputeShaderInstance
 	{
 	public:
-		GenerateChunkComputeShader(Chunk const& inChunk, GLuint inChunkInfoBuffer)
+		GenerateChunkComputeShader(Chunk const& inChunk, GLuint inChunkInfoBuffer, GLuint inNoiseTextures[],
+		                           uint32_t inNumNoiseTextures)
 			: chunk{inChunk}
 			, chunkInfoBuffer{inChunkInfoBuffer}
-		{}
+			, noiseTextures{}
+			, numNoiseTextures{inNumNoiseTextures}
+		{
+			::memcpy(noiseTextures, inNoiseTextures, numNoiseTextures * sizeof(noiseTextures[0]));
+			VW_LOG_DEBUG("%u\n", noiseTextures[numNoiseTextures - 1]);
+		}
 
 		virtual void bind() const override
 		{
 			ComputeShaderInstance::bind();
 
+			// Upload chunk info data
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, chunkInfoBuffer);
 			glBufferSubData(GL_SHADER_STORAGE_BUFFER, chunk.indirectDrawArgsOffset, sizeof(ChunkInfo), &chunk.info);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 			GL_CHECK_ERRORS;
 
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, chunk.vertexBuffer);
-			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, chunkInfoBuffer, chunk.indirectDrawArgsOffset,
+			// Bind buffers
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, chunkInfoBuffer, chunk.indirectDrawArgsOffset,
 			                  sizeof(ChunkInfo));
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, chunk.vertexBuffer, 0,
+			                  chunk.info.maxVertexCount * sizeof(ChunkVertexPositionOnly));
+			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 2, chunk.vertexBuffer,
+			                  chunk.info.maxVertexCount * sizeof(ChunkVertexPositionOnly),
+			                  chunk.info.maxVertexCount * sizeof(ChunkVertexVaryings));
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, edgesBuffer);
 			GL_CHECK_ERRORS;
+
+			// Bind textures
+			for (uint32_t idx = 0; idx < numNoiseTextures; idx++)
+			{
+				glActiveTexture(GL_TEXTURE0 + idx);
+				glBindTexture(GL_TEXTURE_3D, noiseTextures[idx]);
+			}
 		}
 
 		virtual void unbind() const override
@@ -527,6 +554,8 @@ namespace VaporWorldVR
 		static GLuint edgesBuffer;
 		Chunk const& chunk;
 		GLuint chunkInfoBuffer;
+		GLuint noiseTextures[4];
+		uint32_t numNoiseTextures;
 
 		virtual ComputeShader* getComputeShader() const override
 		{
@@ -536,7 +565,6 @@ namespace VaporWorldVR
 				static GLchar const shaderSource[] =
 					"#version 320 es\n"
 					"layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;"
-					"layout(std430) buffer;"
 
 					"struct ChunkInfo"
 					"{"
@@ -550,72 +578,108 @@ namespace VaporWorldVR
 					"	float size;"
 					"};"
 
-					"const vec3 _83[8] = vec3[](vec3(0.0), vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), vec3(1.0), vec3(1.0, 0.0, 1.0));"
+					"const vec3 _128[8] = vec3[](vec3(0.0), vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), vec3(1.0), vec3(1.0, 0.0, 1.0));"
+					"const vec3 _209[32] = vec3[](vec3(0.28658199310302734375, 0.2577629983425140380859375, -0.922729015350341796875), vec3(-0.171811997890472412109375, -0.888078987598419189453125, 0.4263750016689300537109375), vec3(0.440764009952545166015625, -0.502089023590087890625, -0.7440659999847412109375), vec3(-0.8410069942474365234375, -0.4288179874420166015625, -0.3298819959163665771484375), vec3(-0.3802129924297332763671875, -0.588038027286529541015625, -0.713898003101348876953125), vec3(-0.0553929992020130157470703125, -0.20715999603271484375, -0.97673797607421875), vec3(-0.9015100002288818359375, -0.0778110027313232421875, 0.4257059991359710693359375), vec3(-0.974592983722686767578125, 0.123829998075962066650390625, -0.18664300441741943359375), vec3(0.2080419957637786865234375, -0.524280011653900146484375, 0.825740993022918701171875), vec3(0.258428990840911865234375, -0.898570001125335693359375, -0.35466301441192626953125), vec3(-0.2621180117130279541015625, 0.574474990367889404296875, -0.775417983531951904296875), vec3(0.735212028026580810546875, 0.551819980144500732421875, 0.3936460018157958984375), vec3(0.828700006008148193359375, -0.523922979831695556640625, -0.196877002716064453125), vec3(0.788742005825042724609375, 0.0057270000688731670379638671875, -0.614697992801666259765625), vec3(-0.69688498973846435546875, 0.6493380069732666015625, -0.3044860064983367919921875), vec3(-0.625312983989715576171875, 0.08241300284862518310546875, -0.776009976863861083984375), vec3(0.3586960136890411376953125, 0.92872297763824462890625, 0.093864001333713531494140625), vec3(0.18826399743556976318359375, 0.6289780139923095703125, 0.754283010959625244140625), vec3(-0.495193004608154296875, 0.2945959866046905517578125, 0.817310988903045654296875), vec3(0.81888902187347412109375, 0.50866997241973876953125, -0.2658509910106658935546875), vec3(0.02718899957835674285888671875, 0.0577570013701915740966796875, 0.99795997142791748046875), vec3(-0.18842099606990814208984375, 0.961802005767822265625, -0.198581993579864501953125), vec3(0.995438992977142333984375, 0.01998200081288814544677734375, 0.09328199923038482666015625), vec3(-0.3152540028095245361328125, -0.925345003604888916015625, -0.2105959951877593994140625), vec3(0.411992013454437255859375, -0.877705991268157958984375, 0.2447330057621002197265625), vec3(0.62585699558258056640625, 0.080058999359607696533203125, 0.77581799030303955078125), vec3(-0.2438389956951141357421875, 0.866185009479522705078125, 0.436194002628326416015625), vec3(-0.72546398639678955078125, -0.643644988536834716796875, 0.2437680065631866455078125), vec3(0.76678502559661865234375, -0.4307020008563995361328125, 0.475959002971649169921875), vec3(-0.4463759958744049072265625, -0.3916639983654022216796875, 0.8045799732208251953125), vec3(-0.76155698299407958984375, 0.56250798702239990234375, 0.32189500331878662109375), vec3(0.344460010528564453125, 0.753223001956939697265625, -0.56035900115966796875));"
+
+					"struct ChunkVertexPositionOnly"
+					"{"
+					"	vec3 position;"
+					"	int _;"
+					"};"
 
 					"struct ChunkVertexVaryings"
 					"{"
 					"	vec3 normal;"
-					"	vec4 tangent;"
 					"	float occlusion;"
+					"	vec4 tangent;"
 					"};"
 
-					"layout(binding = 3) readonly buffer EdgesBuffer"
-					"{"
-					"	int edges[3840];"
-					"} _314;"
-
-					"layout(binding = 2) buffer ChunkInfoBuffer"
+					"layout(binding = 0, std430) buffer ChunkInfoBuffer"
 					"{"
 					"	ChunkInfo chunkInfo;"
-					"} _34;"
+					"} _77;"
 
-					"layout(binding = 0) writeonly buffer PositionsBuffer"
+					"layout(binding = 3, std430) readonly buffer ConnectedEdgesBuffer"
 					"{"
-					"	vec4 positions[];"
-					"} _350;"
+					"	int connectedEdges[256][15];"
+					"} _353;"
 
-					"layout(binding = 1) writeonly buffer ChunkVertexVaryingsBuffer"
+					"layout(binding = 1, std430) writeonly buffer ChunkVertexPositionOnlyBuffer"
+					"{"
+					"	ChunkVertexPositionOnly positions[];"
+					"} _407;"
+
+					"layout(binding = 2, std430) writeonly buffer ChunkVertexVaryingsBuffer"
 					"{"
 					"	ChunkVertexVaryings varyings[];"
-					"} _366;"
+					"} _551;"
+
+					"layout(binding = 0) uniform lowp sampler3D noiseTextureSampler0;"
+					"layout(binding = 1) uniform lowp sampler3D noiseTextureSampler1;"
+					"layout(binding = 2) uniform lowp sampler3D noiseTextureSampler2;"
 
 					"float sampleDensity(vec3 pos)"
 					"{"
-					"	return 0.5f - length(vec3(0.f, 0.5f, -1.5f) - pos);"
+					"	float density = 0.0;"
+					"	density += (texture(noiseTextureSampler0, pos * 0.007).x * 0.20000000298023223876953125);"
+					"	density += (texture(noiseTextureSampler1, pos * 0.05).x * 0.300000011920928955078125);"
+					"	density += (texture(noiseTextureSampler2, pos * 0.25).x * 0.5);"
+					"	return (density * 2.0) - pos.y;"
+					"}"
+
+					"float computeOcclusion(vec3 pos)"
+					"{"
+					"	float occlusion = 0.0;"
+					"	for (uint i = 0u; i < 32u; i++)"
+					"	{"
+					"		vec3 ray = _209[i] * 0.00999999977648258209228515625;"
+					"		float v = 1.0;"
+					"		for (uint j = 0u; j < 8u; j++, ray *= 2.0)"
+					"		{"
+					"			vec3 param = pos + ray;"
+					"			float d = sampleDensity(param);"
+					"			v *= 1.0 - clamp(d * 9999.0, 0.0, 1.0);"
+					"		}"
+					"		occlusion += (v / 32.0);"
+					"	}"
+					"	return occlusion * 0.5f + 0.5f;"
 					"}"
 
 					"void main()"
 					"{"
 					"	ivec3 voxelIndex = ivec3(gl_GlobalInvocationID);"
-					"	float _step = _34.chunkInfo.size / float(_34.chunkInfo.resolution);"
-					"	vec3 offset = vec3(voxelIndex) * _step;"
-					"	vec3 position = _34.chunkInfo.origin + offset;"
+					"	float voxelSize = _77.chunkInfo.size / float(_77.chunkInfo.resolution);"
+					"	vec3 voxelOffset = vec3(voxelIndex) * voxelSize;"
+					"	vec3 voxelWSPos = _77.chunkInfo.origin + voxelOffset;"
 					"	float densities[8];"
-					"	for (uint i = 0u; i < 8u; i++)"
+					"	for (int i = 0; i < 8; i++)"
 					"	{"
-					"		vec3 param = position + (_83[i] * _step);"
+					"		vec3 param = voxelWSPos + (_128[i] * voxelSize);"
 					"		densities[i] = sampleDensity(param);"
 					"	}"
-					"	uint marchingCase = (((((((uint(densities[0] > 0.0) << uint(0)) | (uint(densities[1] > 0.0) << uint(1))) | (uint(densities[2] > 0.0) << uint(2))) | (uint(densities[3] > 0.0) << uint(3))) | (uint(densities[4] > 0.0) << uint(4))) | (uint(densities[5] > 0.0) << uint(5))) | (uint(densities[6] > 0.0) << uint(6))) | (uint(densities[7] > 0.0) << uint(7));"
-					"	if ((marchingCase == 0u) || (marchingCase == 255u))"
+					"	uint perm = (((((((uint(densities[0] > 0.0) << uint(0)) | (uint(densities[1] > 0.0) << uint(1))) | (uint(densities[2] > 0.0) << uint(2))) | (uint(densities[3] > 0.0) << uint(3))) | (uint(densities[4] > 0.0) << uint(4))) | (uint(densities[5] > 0.0) << uint(5))) | (uint(densities[6] > 0.0) << uint(6))) | (uint(densities[7] > 0.0) << uint(7));"
+					"	if ((perm == 0u) || (perm == 255u))"
 					"	{"
 					"		return;"
 					"	}"
-					"	vec3 offsets[12] = vec3[](mix(vec3(0.0), vec3(0.0, 1.0, 0.0), vec3((-densities[0]) / (densities[1] - densities[0]))), mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), vec3((-densities[1]) / (densities[2] - densities[1]))), mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3((-densities[2]) / (densities[3] - densities[2]))), mix(vec3(1.0, 0.0, 0.0), vec3(0.0), vec3((-densities[3]) / (densities[0] - densities[3]))), mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), vec3((-densities[4]) / (densities[5] - densities[4]))), mix(vec3(0.0, 1.0, 1.0), vec3(1.0), vec3((-densities[5]) / (densities[6] - densities[5]))), mix(vec3(1.0), vec3(1.0, 0.0, 1.0), vec3((-densities[6]) / (densities[7] - densities[6]))), mix(vec3(1.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0), vec3((-densities[7]) / (densities[4] - densities[7]))), mix(vec3(0.0), vec3(0.0, 0.0, 1.0), vec3((-densities[0]) / (densities[4] - densities[0]))), mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 1.0), vec3((-densities[1]) / (densities[5] - densities[1]))), mix(vec3(1.0, 1.0, 0.0), vec3(1.0), vec3((-densities[2]) / (densities[6] - densities[2]))), mix(vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 1.0), vec3((-densities[3]) / (densities[7] - densities[3]))));"
-					"	for (uint i_1 = 0u; i_1 < 15u; i_1 += 3u)"
+					"	vec3 voxelVertexOffsets[12] = vec3[](mix(vec3(0.0), vec3(0.0, 1.0, 0.0), vec3((-densities[0]) / (densities[1] - densities[0]))), mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), vec3((-densities[1]) / (densities[2] - densities[1]))), mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), vec3((-densities[2]) / (densities[3] - densities[2]))), mix(vec3(1.0, 0.0, 0.0), vec3(0.0), vec3((-densities[3]) / (densities[0] - densities[3]))), mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), vec3((-densities[4]) / (densities[5] - densities[4]))), mix(vec3(0.0, 1.0, 1.0), vec3(1.0), vec3((-densities[5]) / (densities[6] - densities[5]))), mix(vec3(1.0), vec3(1.0, 0.0, 1.0), vec3((-densities[6]) / (densities[7] - densities[6]))), mix(vec3(1.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0), vec3((-densities[7]) / (densities[4] - densities[7]))), mix(vec3(0.0), vec3(0.0, 0.0, 1.0), vec3((-densities[0]) / (densities[4] - densities[0]))), mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 1.0), vec3((-densities[1]) / (densities[5] - densities[1]))), mix(vec3(1.0, 1.0, 0.0), vec3(1.0), vec3((-densities[2]) / (densities[6] - densities[2]))), mix(vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 1.0), vec3((-densities[3]) / (densities[7] - densities[3]))));"
+					"	uint numVertices = 0u;"
+					"	for (; (_353.connectedEdges[perm][numVertices] != (-1)) && (numVertices <= 15u); numVertices++)"
 					"	{"
-					"		uint j = (marchingCase * 15u) + i_1;"
-					"		if (_314.edges[j] == -1)"
-					"		{"
-					"			break;"
-					"		}"
-					"		uint _326 = atomicAdd(_34.chunkInfo.vertexCount, 3u);"
-					"		uint vertexIdx = _326;"
-					"		for (uint k = 0u; k < 3u; k++)"
-					"		{"
-					"			vec3 offset = offsets[_314.edges[j + k]] * _step;"
-					"			_350.positions[vertexIdx + k] = vec4(position + offset, 1.f);"
-					"		}"
+					"	}"
+					"	if ((_77.chunkInfo.vertexCount + numVertices) > _77.chunkInfo.maxVertexCount)"
+					"	{"
+					"		return;"
+					"	}"
+					"	uint _379 = atomicAdd(_77.chunkInfo.vertexCount, numVertices);"
+					"	uint baseVertexIdx = _379;"
+					"	for (uint vertexIdx = 0u; vertexIdx < numVertices; vertexIdx++)"
+					"	{"
+					"		uint edgeIdx = uint(_353.connectedEdges[perm][vertexIdx]);"
+					"		vec3 vertexWSPos = voxelWSPos + (voxelVertexOffsets[edgeIdx] * voxelSize);"
+					"		_407.positions[baseVertexIdx + vertexIdx].position = vertexWSPos;"
+					"		vec3 param_1 = vertexWSPos;"
+					"		_551.varyings[baseVertexIdx + vertexIdx].occlusion = computeOcclusion(param_1);"
 					"	}"
 					"}";
 
@@ -645,7 +709,7 @@ namespace VaporWorldVR
 	{
 		GLuint vao;
 		GLuint indirectDrawArgsBuffer;
-		GLuint noiseTextures[3];
+		GLuint noiseTextures[4];
 		Chunk chunk;
 	};
 
@@ -659,21 +723,18 @@ namespace VaporWorldVR
 
 	static void initChunk(Chunk& chunk, uint32_t idx)
 	{
+		constexpr size_t vertexDataSize = sizeof(ChunkVertexPositionOnly) + sizeof(ChunkVertexVaryings);
 		chunk.info.vertexCount = 0;
 		chunk.info.firstVertex = 0;
 		chunk.info.instanceCount = 1;
-		chunk.info.origin = {0.f, 0.f, -2.f};
-		chunk.info.resolution = 32;
-		chunk.info.size = 1.f;
+		chunk.info.origin = {-1.f, -1.f, -1.f};
+		chunk.info.resolution = 64;
+		chunk.info.size = 2.f;
+		chunk.info.maxVertexCount = CHUNK_MAX_VERTEX_BUFFER_SIZE / vertexDataSize;
 
-		uint64_t maxVoxelCount = chunk.info.resolution * chunk.info.resolution * chunk.info.resolution;
-		chunk.info.maxVertexCount = maxVoxelCount * VOXEL_MAX_VERTEX_COUNT;
-
-		constexpr size_t vertexDataSize = (sizeof(float3) + sizeof(ChunkVertexVaryingsPackedData));
-		size_t vertexBufferSize = chunk.info.maxVertexCount * vertexDataSize;
 		glGenBuffers(1, &chunk.vertexBuffer);
 		glBindBuffer(GL_ARRAY_BUFFER, chunk.vertexBuffer);
-		glBufferData(GL_ARRAY_BUFFER, vertexBufferSize, NULL, GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, CHUNK_MAX_VERTEX_BUFFER_SIZE, NULL, GL_STATIC_DRAW);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		chunk.indirectDrawArgsOffset = idx * sizeof(ChunkInfo);
 		chunk.dirty = true;
@@ -703,22 +764,59 @@ namespace VaporWorldVR
 	}
 
 
-	static float perlinNoiseSample3D(PerlinNoise const& noise, float3 pos, uint3 period)
+	static float perlinGradientValue(PerlinNoise const& noise, float3 p, int3 i, int3 period)
 	{
-		return 0.f;
+		float3 grad = noise.grads[noise.perms[(noise.perms[(noise.perms[i.x % period.x] + i.y) % period.y] + i.z) % period.z]];
+		return p.dot(grad);
 	}
 
 
-	static float perlinNoiseSampleOctaves3D(PerlinNoise const& noise, float3 pos, uint3 period, uint32_t numOctaves)
+	static float perlinNoiseSample3D(PerlinNoise const& noise, float3 pos, int3 period)
+	{
+		static constexpr int3 voxelVertices[] = {{0, 0, 0},
+		                                         {1, 0, 0},
+		                                         {0, 1, 0},
+		                                         {1, 1, 0},
+		                                         {0, 0, 1},
+		                                         {1, 0, 1},
+		                                         {0, 1, 1},
+		                                         {1, 1, 1}};
+
+		int3 i = (int3)pos;
+		float3 t = pos - (float3)i;
+		float3 w = t * t * (3.f - t * 2.f);
+
+		return Math::lerp(
+			Math::lerp(
+				Math::lerp(perlinGradientValue(noise, t - (float3)voxelVertices[0], i + voxelVertices[0], period),
+				           perlinGradientValue(noise, t - (float3)voxelVertices[1], i + voxelVertices[1], period), w.x),
+				Math::lerp(perlinGradientValue(noise, t - (float3)voxelVertices[2], i + voxelVertices[2], period),
+				           perlinGradientValue(noise, t - (float3)voxelVertices[3], i + voxelVertices[3], period), w.x),
+				w.y
+			),
+			Math::lerp(
+				Math::lerp(perlinGradientValue(noise, t - (float3)voxelVertices[4], i + voxelVertices[4], period),
+				           perlinGradientValue(noise, t - (float3)voxelVertices[5], i + voxelVertices[5], period), w.x),
+				Math::lerp(perlinGradientValue(noise, t - (float3)voxelVertices[6], i + voxelVertices[6], period),
+				           perlinGradientValue(noise, t - (float3)voxelVertices[7], i + voxelVertices[7], period), w.x),
+				w.y
+			),
+			w.z
+		);
+	}
+
+
+	static float perlinNoiseSampleOctaves3D(PerlinNoise const& noise, float3 const& pos, int3 period, uint32_t numOctaves)
 	{
 		float value = 0.f;
 		float freq = 1.f;
 		float ampl = 0.5f;
 
-		for (uint32_t octave; octave < numOctaves; octave++)
+		for (uint32_t octave = 0; octave < numOctaves; octave++)
 		{
 			value += perlinNoiseSample3D(noise, pos * freq, period) * ampl;
 			freq *= 2.f;
+			period *= 2;
 			ampl *= 0.5f;
 		}
 
@@ -730,7 +828,7 @@ namespace VaporWorldVR
 	{
 		// The size of the texture buffer in Bytes
 		size_t const textureBufferSize = textureRes.x * textureRes.y * textureRes.z * sizeof(float);
-		float3 const textureDensity{textureRes};
+		float3 const textureDensity{textureRes / 4};
 
 		// Generate GL textures
 		glGenTextures(numTextures, textures);
@@ -754,7 +852,7 @@ namespace VaporWorldVR
 					{
 						size_t const pixelIdx = ((i * textureRes.y) + j) * textureRes.z + k;
 						float3 pos{i / textureDensity.x, j / textureDensity.y, k / textureDensity.z};
-						textureBuffer[pixelIdx] = perlinNoiseSampleOctaves3D(noiseGen, pos, textureRes, 5);
+						textureBuffer[pixelIdx] = perlinNoiseSampleOctaves3D(noiseGen, pos, 4, 5);
 					}
 				}
 			}
@@ -868,7 +966,7 @@ namespace VaporWorldVR
 				GL_CHECK_ERRORS;
 
 				glEnable(GL_DEPTH_TEST);
-				glEnable(GL_CULL_FACE);
+				glDisable(GL_CULL_FACE);
 				GL_CHECK_ERRORS;
 
 				glViewport(0, 0, eyeTextureSize.x, eyeTextureSize.y);
@@ -907,12 +1005,10 @@ namespace VaporWorldVR
 
 						glDisableVertexAttribArray(1);
 						glDisableVertexAttribArray(2);
-						glDisableVertexAttribArray(3);
-						glVertexAttribFormat(1, 3, GL_FLOAT, GL_FALSE, offsetof(ChunkVertexVaryingsPackedData, normal));
-						glVertexAttribFormat(2, 4, GL_FLOAT, GL_FALSE,
-						                     offsetof(ChunkVertexVaryingsPackedData, tangent));
-						glVertexAttribFormat(3, 1, GL_FLOAT, GL_FALSE,
-						                     offsetof(ChunkVertexVaryingsPackedData, occlusion));
+						glEnableVertexAttribArray(3);
+						glVertexAttribFormat(1, 3, GL_FLOAT, GL_FALSE, offsetof(ChunkVertexVaryings, normal));
+						glVertexAttribFormat(2, 4, GL_FLOAT, GL_FALSE, offsetof(ChunkVertexVaryings, tangent));
+						glVertexAttribFormat(3, 1, GL_FLOAT, GL_FALSE, offsetof(ChunkVertexVaryings, occlusion));
 						glVertexAttribBinding(1, 1);
 						glVertexAttribBinding(2, 1);
 						glVertexAttribBinding(3, 1);
@@ -923,7 +1019,10 @@ namespace VaporWorldVR
 
 					// Draw chunk
 					glBindVertexArray(cmd.scene->vao);
-					glBindVertexBuffer(0, cmd.scene->chunk.vertexBuffer, 0, sizeof(float4));
+					glBindVertexBuffer(0, cmd.scene->chunk.vertexBuffer, 0, sizeof(ChunkVertexPositionOnly));
+					glBindVertexBuffer(1, cmd.scene->chunk.vertexBuffer,
+					                   cmd.scene->chunk.info.maxVertexCount * sizeof(ChunkVertexPositionOnly),
+									   sizeof(ChunkVertexVaryings));
 					glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmd.scene->indirectDrawArgsBuffer);
 					glDrawArraysIndirect(GL_TRIANGLES, (void*)cmd.scene->chunk.indirectDrawArgsOffset);
 					glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
@@ -1443,6 +1542,7 @@ namespace VaporWorldVR
 				frameCounter++;
 
 				// Predict display time and HMD pose
+				vrapi_SetTrackingSpace(ovr, VRAPI_TRACKING_SPACE_LOCAL_FLOOR);
 				displayTime = vrapi_GetPredictedDisplayTime(ovr, frameCounter);
 				tracking = vrapi_GetPredictedTracking2(ovr, displayTime);
 
@@ -1636,7 +1736,7 @@ namespace VaporWorldVR
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 			// Create and upload noise textures
-			initNoiseTextures(scene->noiseTextures, 1, 64);
+			initNoiseTextures(scene->noiseTextures, 3, 64);
 
 			// Initialize first chunk
 			initChunk(scene->chunk, 0);
@@ -1650,8 +1750,9 @@ namespace VaporWorldVR
 
 				// We need to regenerate chunk data
 				RenderCommandDispatchCompute computeCmd;
-				computeCmd.shader = new GenerateChunkComputeShader(scene->chunk, scene->indirectDrawArgsBuffer);
-				computeCmd.groups = {4, 4, 4};
+				computeCmd.shader = new GenerateChunkComputeShader(scene->chunk, scene->indirectDrawArgsBuffer,
+				                                                   scene->noiseTextures, 3);
+				computeCmd.groups = {8, 8, 8};
 				computeCmd.fence = &fence;
 				renderer->postMessage(computeCmd, MessageWait_Processed);
 				scene->chunk.dirty = false;
